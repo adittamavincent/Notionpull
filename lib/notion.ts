@@ -82,6 +82,8 @@ export function propertyValue(prop: any, options: PropertyValueOptions = {}): st
       return rollupValue(prop.rollup, options);
     case "formula":
       return formulaValue(prop.formula, options);
+    case "unique_id":
+      return uniqueIdValue(prop.unique_id);
     case "created_time":
       return prop.created_time ?? "";
     case "last_edited_time":
@@ -93,6 +95,11 @@ export function propertyValue(prop: any, options: PropertyValueOptions = {}): st
     default:
       return "";
   }
+}
+
+function uniqueIdValue(uniqueId: any): string {
+  if (!uniqueId || uniqueId.number == null) return "";
+  return [uniqueId.prefix, uniqueId.number].filter((part) => part != null && part !== "").join("-");
 }
 
 function formulaValue(formula: any, options: PropertyValueOptions): string {
