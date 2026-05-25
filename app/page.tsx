@@ -84,6 +84,7 @@ export default function Page() {
     event.preventDefault();
     if (!activeToken || !url.trim()) return;
     setError("");
+    setLoadingTree(true);
     setDetected(null);
     setNodes([]);
     setSelected(new Set());
@@ -107,6 +108,7 @@ export default function Page() {
       throw lastError;
     } catch (err) {
       setError(errorMessage(err));
+      setLoadingTree(false);
     }
   }
 
@@ -332,8 +334,18 @@ export default function Page() {
                   onChange={(event) => setUrl(event.target.value)}
                   placeholder="https://www.notion.so/..."
                 />
-                <button className="rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:bg-zinc-400" disabled={loadingTree || !url.trim()}>
-                  Fetch
+                <button 
+                  className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]" 
+                  disabled={loadingTree || !url.trim()}
+                >
+                  {loadingTree && !detected ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span>Fetching...</span>
+                    </>
+                  ) : (
+                    "Fetch"
+                  )}
                 </button>
               </div>
               
@@ -368,8 +380,12 @@ export default function Page() {
                     {depthOptions.map((option) => (
                       <button
                         key={option}
-                        className={`rounded px-3 py-1 text-sm font-medium transition-colors ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-600 hover:bg-zinc-100"}`}
-                        onClick={() => setDepth(option)}
+                        className={`rounded px-3 py-1 text-sm font-medium transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-600 hover:bg-zinc-100"}`}
+                        onClick={() => {
+                          setLoadingTree(true);
+                          setDepth(option);
+                        }}
+                        disabled={loadingTree}
                       >
                         Depth: {option}
                       </button>
@@ -411,8 +427,19 @@ export default function Page() {
               <span className="inline-block rounded-full bg-zinc-100 px-2.5 py-0.5 text-zinc-900 mr-1.5">{selected.size}</span>
               items selected
             </div>
-            <button className="rounded-md bg-zinc-900 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-zinc-800 hover:shadow-lg disabled:bg-zinc-400" onClick={runExport} disabled={exporting}>
-              Export Data
+            <button 
+              className="flex items-center gap-2 rounded-md bg-zinc-900 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-zinc-800 active:scale-95 hover:shadow-lg disabled:bg-zinc-400" 
+              onClick={runExport} 
+              disabled={exporting}
+            >
+              {exporting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                  <span>Preparing...</span>
+                </>
+              ) : (
+                "Export Data"
+              )}
             </button>
           </div>
         </div>
