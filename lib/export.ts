@@ -1,30 +1,32 @@
 import type { NotionBlock, NotionPage } from "@/types/notion";
-import { pageTitle, plainText, propertyValue } from "@/lib/notion";
+import { propertyValue, type PropertyValueOptions } from "@/lib/notion";
 
 export type DatabaseExportItem = { kind: "database" | "data_source"; title: string; rows: NotionPage[] };
 export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[] };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
-export function exportMarkdown(items: ExportItem[]): string {
+export type ExportOptions = PropertyValueOptions;
+
+export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
   return items.map((item) => {
     if (isDatabaseItem(item)) {
-      return databaseToMarkdown(item.title, item.rows);
+      return databaseToMarkdown(item.title, item.rows, options);
     }
     const heading = `# ${item.title}`;
-    const properties = item.page ? pagePropertiesToMarkdown(item.page) : "";
+    const properties = item.page ? pagePropertiesToMarkdown(item.page, options) : "";
     const blocks = item.blocks?.map(blockToMarkdown).filter(Boolean).join("\n") ?? "";
     return [heading, properties, blocks].filter(Boolean).join("\n\n");
   }).join("\n\n---\n\n");
 }
 
-export function exportCsv(items: ExportItem[]): string {
+export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
   return items.map((item) => {
     if (isDatabaseItem(item)) {
-      return databaseToCsv(item.title, item.rows);
+      return databaseToCsv(item.title, item.rows, options);
     }
     const rows = [["property", "value"]];
     if (item.page?.properties) {
-      for (const [name, prop] of Object.entries(item.page.properties)) rows.push([name, propertyValue(prop)]);
+      for (const [name, prop] of Object.entries(item.page.properties)) rows.push([name, propertyValue(prop, options)]);
     } else {
       rows.push(["title", item.title]);
     }
@@ -36,22 +38,22 @@ function isDatabaseItem(item: ExportItem): item is DatabaseExportItem {
   return item.kind === "database" || item.kind === "data_source";
 }
 
-function databaseToMarkdown(title: string, rows: NotionPage[]): string {
+function databaseToMarkdown(title: string, rows: NotionPage[], options: ExportOptions): string {
   const columns = databaseColumns(rows);
   const head = [`## ${title}`];
   if (!rows.length) return `${head[0]}\n\n_No rows._`;
   head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
   head.push(`| ${columns.map(() => "---").join(" | ")} |`);
   for (const row of rows) {
-    head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column]))).join(" | ")} |`);
+    head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
   }
   return head.join("\n");
 }
 
-function databaseToCsv(title: string, rows: NotionPage[]): string {
+function databaseToCsv(title: string, rows: NotionPage[], options: ExportOptions): string {
   const columns = databaseColumns(rows);
   const lines = [`# ${title}`, csvRow(columns)];
-  for (const row of rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column]))));
+  for (const row of rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
   return lines.join("\n");
 }
 
@@ -63,8 +65,8 @@ function databaseColumns(rows: NotionPage[]): string[] {
   return [...seen];
 }
 
-function pagePropertiesToMarkdown(page: NotionPage): string {
-  const entries = Object.entries(page.properties ?? {}).map(([key, value]) => `- **${key}:** ${propertyValue(value)}`);
+function pagePropertiesToMarkdown(page: NotionPage, options: ExportOptions): string {
+  const entries = Object.entries(page.properties ?? {}).map(([key, value]) => `- **${key}:** ${propertyValue(value, options)}`);
   return entries.length ? entries.join("\n") : "";
 }
 
@@ -116,7 +118,6 @@ function blockToMarkdown(block: NotionBlock): string {
 function richTextToMarkdown(richText: any[] = []): string {
   return richText.map((part) => {
     let text = part.plain_text ?? "";
-    if (part.href) text = `[${text}](${part.href})`;
     if (part.annotations?.code) text = `\`${text}\``;
     if (part.annotations?.bold) text = `**${text}**`;
     if (part.annotations?.italic) text = `_${text}_`;

@@ -13,10 +13,19 @@ export class NotionApiError extends Error {
 }
 
 export function formatNotionId(input: string): string {
+  const id = extractNotionIds(input)[0];
+  if (!id) throw new Error("Could not find a valid Notion ID in that URL.");
+  return id;
+}
+
+export function extractNotionIds(input: string): string[] {
   const compact = input.replace(/-/g, "");
-  const match = compact.match(/[0-9a-fA-F]{32}/);
-  if (!match) throw new Error("Could not find a valid Notion ID in that URL.");
-  const id = match[0].toLowerCase();
+  const matches = compact.match(/[0-9a-fA-F]{32}/g) ?? [];
+  return Array.from(new Set(matches.map(formatCompactNotionId)));
+}
+
+function formatCompactNotionId(compactId: string): string {
+  const id = compactId.toLowerCase();
   return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 }
 
@@ -34,7 +43,11 @@ export function pageTitle(page: NotionPage): string {
   return plainText(titleProp?.title) || "Untitled page";
 }
 
-export function propertyValue(prop: any): string {
+export type PropertyValueOptions = {
+  titleById?: Map<string, string> | Record<string, string>;
+};
+
+export function propertyValue(prop: any, options: PropertyValueOptions = {}): string {
   if (!prop) return "";
   switch (prop.type) {
     case "title":
@@ -54,7 +67,7 @@ export function propertyValue(prop: any): string {
     case "checkbox":
       return prop.checkbox ? "true" : "false";
     case "url":
-      return prop.url ?? "";
+      return titleFromUrl(prop.url, options);
     case "email":
       return prop.email ?? "";
     case "phone_number":
@@ -64,11 +77,11 @@ export function propertyValue(prop: any): string {
     case "files":
       return prop.files?.map((file: any) => file.name).join(", ") ?? "";
     case "relation":
-      return prop.relation?.map((rel: any) => rel.id).join(", ") ?? "";
+      return prop.relation?.map((rel: any) => titleForId(rel.id, options)).filter(Boolean).join(", ") ?? "";
     case "rollup":
-      return rollupValue(prop.rollup);
+      return rollupValue(prop.rollup, options);
     case "formula":
-      return formulaValue(prop.formula);
+      return formulaValue(prop.formula, options);
     case "created_time":
       return prop.created_time ?? "";
     case "last_edited_time":
@@ -82,16 +95,40 @@ export function propertyValue(prop: any): string {
   }
 }
 
-function formulaValue(formula: any): string {
+function formulaValue(formula: any, options: PropertyValueOptions): string {
   if (!formula) return "";
   if (formula.type === "date") return [formula.date?.start, formula.date?.end].filter(Boolean).join(" -> ");
+  if (formula.type === "string") return replaceNotionUrlsWithTitles(String(formula.string ?? ""), options);
   return formula[formula.type] == null ? "" : String(formula[formula.type]);
 }
 
-function rollupValue(rollup: any): string {
+function rollupValue(rollup: any, options: PropertyValueOptions): string {
   if (!rollup) return "";
-  if (rollup.type === "array") return rollup.array?.map(propertyValue).filter(Boolean).join(", ") ?? "";
+  if (rollup.type === "array") return rollup.array?.map((item: any) => propertyValue(item, options)).filter(Boolean).join(", ") ?? "";
   return rollup[rollup.type] == null ? "" : String(rollup[rollup.type]);
+}
+
+export function titleForId(id: string | undefined, options: PropertyValueOptions = {}): string {
+  if (!id) return "";
+  const formatted = formatMaybeNotionId(id);
+  const map = options.titleById;
+  if (map instanceof Map) return map.get(formatted) ?? map.get(id) ?? "";
+  return map?.[formatted] ?? map?.[id] ?? "";
+}
+
+function titleFromUrl(url: string | null | undefined, options: PropertyValueOptions): string {
+  if (!url) return "";
+  const titles = extractNotionIds(url).map((id) => titleForId(id, options)).filter(Boolean);
+  return titles.join(", ");
+}
+
+function replaceNotionUrlsWithTitles(value: string, options: PropertyValueOptions): string {
+  return value.replace(/https?:\/\/\S+/g, (url) => titleFromUrl(url, options));
+}
+
+function formatMaybeNotionId(id: string): string {
+  const compact = id.replace(/-/g, "");
+  return /^[0-9a-fA-F]{32}$/.test(compact) ? formatCompactNotionId(compact) : id;
 }
 
 export function firstTitleProperty(page: NotionPage): string {

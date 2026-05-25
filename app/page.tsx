@@ -1,11 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ContentTree, flattenTree } from "@/components/ContentTree";
 import { ExportModal } from "@/components/ExportModal";
 import { TokenManager } from "@/components/TokenManager";
 import { exportCsv, exportMarkdown, type ExportItem } from "@/lib/export";
-import { firstTitleProperty, formatNotionId } from "@/lib/notion";
+import { extractNotionIds, firstTitleProperty } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
 
@@ -28,6 +28,7 @@ export default function Page() {
   const [format, setFormat] = useState<ExportFormat>("markdown");
   const [exporting, setExporting] = useState(false);
   const [output, setOutput] = useState("");
+  const titleCache = useRef(new Map<string, string>());
 
   useEffect(() => refreshTokens(), []);
 
@@ -50,10 +51,20 @@ export default function Page() {
     setNodes([]);
     setSelected(new Set());
     try {
-      const id = formatNotionId(url);
-      const object = await apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}`);
-      setDetected(object);
-      await loadTree(object);
+      const ids = extractNotionIds(url);
+      if (!ids.length) throw new Error("Could not find a valid Notion ID in that URL.");
+      let lastError: unknown;
+      for (const id of ids) {
+        try {
+          const object = await apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}`);
+          setDetected(object);
+          await loadTree(object);
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError;
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -125,7 +136,8 @@ export default function Page() {
           items.push({ kind: node.kind, title: node.title, page: node.page, blocks });
         }
       }
-      setOutput(format === "markdown" ? exportMarkdown(items) : exportCsv(items));
+      const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current);
+      setOutput(format === "markdown" ? exportMarkdown(items, { titleById }) : exportCsv(items, { titleById }));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -313,4 +325,68 @@ function mapHttpError(status: number, detail?: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected error";
+}
+
+async function buildExportTitleMap(token: string, items: ExportItem[], nodes: TreeNodeData[], cache: Map<string, string>): Promise<Map<string, string>> {
+  const titleById = new Map(cache);
+  for (const node of nodes) setKnownTitle(titleById, cache, node.id, node.title);
+  for (const item of items) {
+    if (isDatabaseExportItem(item)) {
+      for (const row of item.rows) {
+        setKnownTitle(titleById, cache, row.id, firstTitleProperty(row));
+        collectPropertyObjectIds(row.properties, titleById);
+      }
+    } else if (item.page) {
+      setKnownTitle(titleById, cache, item.page.id, firstTitleProperty(item.page));
+      collectPropertyObjectIds(item.page.properties, titleById);
+    }
+  }
+
+  const missingIds = Array.from(titleById.entries()).filter(([, title]) => !title).map(([id]) => id);
+  await Promise.all(missingIds.map(async (id) => {
+    try {
+      const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`);
+      titleById.set(id, object.title);
+      cache.set(id, object.title);
+    } catch {
+      titleById.set(id, "");
+    }
+  }));
+  return titleById;
+}
+
+function setKnownTitle(titleById: Map<string, string>, cache: Map<string, string>, id: string, title: string) {
+  if (!title) return;
+  titleById.set(id, title);
+  cache.set(id, title);
+}
+
+function collectPropertyObjectIds(properties: Record<string, any> | undefined, titleById: Map<string, string>) {
+  for (const prop of Object.values(properties ?? {})) collectObjectIds(prop, titleById);
+}
+
+function collectObjectIds(value: any, titleById: Map<string, string>) {
+  if (!value || typeof value !== "object") return;
+  if (value.type === "relation") {
+    for (const relation of value.relation ?? []) {
+      if (relation.id && !titleById.has(relation.id)) titleById.set(relation.id, "");
+    }
+  }
+  if (value.type === "url") {
+    for (const id of extractNotionIds(value.url ?? "")) {
+      if (!titleById.has(id)) titleById.set(id, "");
+    }
+  }
+  if (value.type === "rollup" && value.rollup?.type === "array") {
+    for (const item of value.rollup.array ?? []) collectObjectIds(item, titleById);
+  }
+  if (value.type === "formula" && value.formula?.type === "string") {
+    for (const id of extractNotionIds(value.formula.string ?? "")) {
+      if (!titleById.has(id)) titleById.set(id, "");
+    }
+  }
+}
+
+function isDatabaseExportItem(item: ExportItem): item is Extract<ExportItem, { rows: NotionPage[] }> {
+  return item.kind === "database" || item.kind === "data_source";
 }

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
         dataSourceId: database.data_sources?.[0]?.id
       });
     } catch (error) {
-      if (!(error instanceof NotionApiError) || error.status !== 404) throw error;
+      if (!isProbeMiss(error)) throw error;
     }
 
     try {
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
         dataSourceId: dataSource.id
       });
     } catch (error) {
-      if (!(error instanceof NotionApiError) || error.status !== 404) throw error;
+      if (!isProbeMiss(error)) throw error;
     }
 
     const page = await notionFetch<NotionPage>(token, `/pages/${id}`);
@@ -36,4 +36,10 @@ export async function GET(request: Request) {
   } catch (error) {
     return notionErrorResponse(error);
   }
+}
+
+function isProbeMiss(error: unknown): boolean {
+  if (!(error instanceof NotionApiError)) return false;
+  if (error.status === 404) return true;
+  return error.status === 400 && /is a (page|database|data source|data_source), not a (page|database|data source|data_source)/i.test(error.message);
 }
