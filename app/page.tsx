@@ -386,8 +386,10 @@ export default function Page() {
                         key={option}
                         className={`rounded px-3 py-1 text-sm font-medium transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-600 hover:bg-zinc-100"}`}
                         onClick={() => {
-                          setLoadingTree(true);
-                          setDepth(option);
+                          if (option !== depth) {
+                            setLoadingTree(true);
+                            setDepth(option);
+                          }
                         }}
                         disabled={loadingTree}
                       >
