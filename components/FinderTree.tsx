@@ -96,7 +96,36 @@ function TreeRow({ node, selected, collapsed, onToggleCollapse, onToggle, onConf
         {getIcon(node.kind)}
       </span>
 
-      <span className="min-w-0 flex-1 truncate font-medium text-zinc-700">{node.title || "Untitled"}</span>
+      <div className="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
+        <span className="truncate font-medium text-zinc-700 shrink-0">{node.title || "Untitled"}</span>
+        {isDatabase && (
+          <div 
+            className="min-w-0 flex-1 flex items-center text-xs text-zinc-400 font-normal py-0.5 overflow-hidden whitespace-nowrap" 
+            title={node.selectedColumns?.join(", ") || "All columns"}
+          >
+            {(() => {
+              const selected = node.selectedColumns;
+              const allCount = node.columns?.length || 0;
+              if (!selected || (allCount > 0 && selected.length === allCount)) return <span>(all)</span>;
+              if (selected.length === 0) return <span>(none)</span>;
+              if (selected.length === 1) return <span className="truncate">({selected[0]})</span>;
+              if (selected.length === 2) return <span className="truncate">({selected[0]}, {selected[1]})</span>;
+              
+              const first = selected[0];
+              const last = selected[selected.length - 1];
+              const middle = selected.slice(1, -1).join(", ");
+              
+              return (
+                <div className="flex min-w-0 overflow-hidden">
+                  <span className="shrink-0">({first},&nbsp;</span>
+                  <span className="truncate">{middle}</span>
+                  <span className="shrink-0">,&nbsp;{last})</span>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
 
       <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
         {node.kind.replace("_", " ")}
