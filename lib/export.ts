@@ -2,45 +2,26 @@ import type { NotionBlock, NotionPage } from "@/types/notion";
 import { propertyValue, type PropertyValueOptions } from "@/lib/notion";
 
 export type DatabaseExportItem = { kind: "database" | "data_source"; title: string; rows: NotionPage[]; columns?: string[]; selectedColumns?: string[] };
-export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[] };
+export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[]; includeProperties?: boolean };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
 export type ExportOptions = PropertyValueOptions;
 
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
-  const pageItems = items.filter((candidate): candidate is PageExportItem => !isDatabaseItem(candidate));
-  if (pageItems.length > 1 && pageItems.length === items.length) {
-    return pageItemsToMarkdownTable(pageItems, options);
-  }
-
   return items.map((item) => {
     if (isDatabaseItem(item)) {
       return databaseToMarkdown(item, options);
     }
-    const heading = `# ${item.title}`;
-    const properties = item.page ? pagePropertiesToMarkdown(item.page, options) : "";
-    const blocks = item.blocks?.map(blockToMarkdown).filter(Boolean).join("\n") ?? "";
-    return [heading, properties, blocks].filter(Boolean).join("\n\n");
+    return pageToXml(item, options);
   }).join("\n\n---\n\n");
 }
 
 export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
-  const pageItems = items.filter((candidate): candidate is PageExportItem => !isDatabaseItem(candidate));
-  if (pageItems.length > 1 && pageItems.length === items.length) {
-    return pageItemsToCsvTable(pageItems, options);
-  }
-
   return items.map((item) => {
     if (isDatabaseItem(item)) {
       return databaseToCsv(item, options);
     }
-    const rows = [["property", "value"]];
-    if (item.page?.properties) {
-      for (const [name, prop] of Object.entries(item.page.properties)) rows.push([name, propertyValue(prop, options)]);
-    } else {
-      rows.push(["title", item.title]);
-    }
-    return `# ${item.title}\n${rows.map(csvRow).join("\n")}`;
+    return pageToXml(item, options);
   }).join("\n\n");
 }
 
@@ -67,40 +48,6 @@ function databaseToCsv(item: DatabaseExportItem, options: ExportOptions): string
   return lines.join("\n");
 }
 
-function pageItemsToMarkdownTable(items: PageExportItem[], options: ExportOptions): string {
-  const columns = ["Title", ...collectPagePropertyColumns(items)];
-  const lines = ["# Selected rows", `| ${columns.map(escapeMarkdown).join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`];
-
-  for (const item of items) {
-    const values = [item.title, ...columns.slice(1).map((column) => propertyValue(item.page?.properties?.[column], options))];
-    lines.push(`| ${values.map((value) => escapeMarkdown(value)).join(" | ")} |`);
-  }
-
-  return lines.join("\n");
-}
-
-function pageItemsToCsvTable(items: PageExportItem[], options: ExportOptions): string {
-  const columns = ["Title", ...collectPagePropertyColumns(items)];
-  const lines = ["# Selected rows", csvRow(columns)];
-
-  for (const item of items) {
-    const values = [item.title, ...columns.slice(1).map((column) => propertyValue(item.page?.properties?.[column], options))];
-    lines.push(csvRow(values));
-  }
-
-  return lines.join("\n");
-}
-
-function collectPagePropertyColumns(items: PageExportItem[]): string[] {
-  const seen = new Set<string>();
-
-  for (const item of items) {
-    for (const column of Object.keys(item.page?.properties ?? {})) seen.add(column);
-  }
-
-  return [...seen];
-}
-
 function databaseColumns(item: DatabaseExportItem): string[] {
   if (item.selectedColumns && item.selectedColumns.length > 0) {
     return item.selectedColumns;
@@ -115,64 +62,93 @@ function databaseColumns(item: DatabaseExportItem): string[] {
   return [...seen];
 }
 
-function pagePropertiesToMarkdown(page: NotionPage, options: ExportOptions): string {
-  const entries = Object.entries(page.properties ?? {}).map(([key, value]) => `- **${key}:** ${propertyValue(value, options)}`);
-  return entries.length ? entries.join("\n") : "";
+function pageToXml(item: PageExportItem, options: ExportOptions): string {
+  const id = item.page?.id;
+  const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
+  if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
+  if (item.kind === "row") attributes.push(`kind="row"`);
+  const lines = [`<page ${attributes.join(" ")}>`];
+
+  if (item.includeProperties !== false && item.page?.properties && Object.keys(item.page.properties).length > 0) {
+    lines.push(indent("<properties>"));
+    for (const [name, prop] of Object.entries(item.page.properties)) {
+      lines.push(indent(`<property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`, 2));
+    }
+    lines.push(indent("</properties>"));
+  }
+
+  const blocks = item.blocks?.map(blockToXml).filter(Boolean) ?? [];
+  if (blocks.length > 0) {
+    lines.push(indent("<content>"));
+    for (const block of blocks) lines.push(indent(block, 2));
+    lines.push(indent("</content>"));
+  }
+
+  lines.push("</page>");
+  return lines.join("\n");
 }
 
-function blockToMarkdown(block: NotionBlock): string {
+function blockToXml(block: NotionBlock): string {
   const data: any = block[block.type];
-  const text = richTextToMarkdown(data?.rich_text);
-  const children = block.children?.map(blockToMarkdown).filter(Boolean).join("\n") ?? "";
-  let line = "";
+  const text = richTextToPlainText(data?.rich_text);
+  const children = block.children?.map(blockToXml).filter(Boolean) ?? [];
+  let tag = "";
+  let attributes = "";
   switch (block.type) {
     case "paragraph":
-      line = text;
+      tag = "paragraph";
       break;
     case "heading_1":
-      line = `# ${text}`;
+      tag = "heading";
+      attributes = ` level="1"`;
       break;
     case "heading_2":
-      line = `## ${text}`;
+      tag = "heading";
+      attributes = ` level="2"`;
       break;
     case "heading_3":
-      line = `### ${text}`;
+      tag = "heading";
+      attributes = ` level="3"`;
       break;
     case "bulleted_list_item":
-      line = `- ${text}`;
+      tag = "bulleted_list_item";
       break;
     case "numbered_list_item":
-      line = `1. ${text}`;
+      tag = "numbered_list_item";
       break;
     case "to_do":
-      line = `- [${data?.checked ? "x" : " "}] ${text}`;
+      tag = "to_do";
+      attributes = ` checked="${data?.checked ? "true" : "false"}"`;
       break;
     case "quote":
-      line = `> ${text}`;
+      tag = "quote";
       break;
     case "code":
-      line = `\`\`\`${data?.language ?? ""}\n${text}\n\`\`\``;
+      tag = "code";
+      attributes = data?.language ? ` language="${escapeXmlAttribute(data.language)}"` : "";
       break;
     case "divider":
-      line = "---";
+      return "<divider />";
       break;
     case "callout":
-      line = `> ${text}`;
+      tag = "callout";
       break;
     default:
-      line = "";
+      return "";
   }
-  return [line, children].filter(Boolean).join("\n");
+
+  if (children.length === 0) return `<${tag}${attributes}>${escapeXmlText(text)}</${tag}>`;
+
+  const lines = [`<${tag}${attributes}>`];
+  if (text) lines.push(indent(escapeXmlText(text)));
+  for (const child of children) lines.push(indent(child));
+  lines.push(`</${tag}>`);
+  return lines.join("\n");
 }
 
-function richTextToMarkdown(richText: any[] = []): string {
+function richTextToPlainText(richText: any[] = []): string {
   return richText.map((part) => {
-    let text = part.plain_text ?? "";
-    if (part.annotations?.code) text = `\`${text}\``;
-    if (part.annotations?.bold) text = `**${text}**`;
-    if (part.annotations?.italic) text = `_${text}_`;
-    if (part.annotations?.strikethrough) text = `~~${text}~~`;
-    return text;
+    return part.plain_text ?? "";
   }).join("");
 }
 
@@ -182,4 +158,17 @@ function csvRow(values: string[]): string {
 
 function escapeMarkdown(value: string): string {
   return String(value ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+
+function escapeXmlText(value: string): string {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeXmlAttribute(value: string): string {
+  return escapeXmlText(value).replace(/"/g, "&quot;");
+}
+
+function indent(value: string, depth = 1): string {
+  const prefix = "  ".repeat(depth);
+  return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
 }

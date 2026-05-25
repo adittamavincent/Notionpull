@@ -265,12 +265,11 @@ export default function Page() {
             }
           }
           
-          // Avoid redundant exports: if it's a row with no internal content, 
-          // and its parent database is already selected (meaning it's in the table), skip it.
-          if (node.kind === "row" && !shouldFetchPageContent(node, depth) && node.parentId && selected.has(node.parentId)) {
-            // Skip
+          const rowAlreadyInSelectedTable = node.kind === "row" && node.parentId && selected.has(node.parentId);
+          if (rowAlreadyInSelectedTable && !blocks.length) {
+            items.push({ kind: node.kind, title: node.title, page: node.page, includeProperties: false });
           } else {
-            items.push({ kind: node.kind, title: node.title, page: node.page, blocks });
+            items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable });
           }
         }
         
