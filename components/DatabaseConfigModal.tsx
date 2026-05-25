@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X, Check } from "lucide-react";
+import { X } from "lucide-react";
 import type { TreeNodeData, NotionPage } from "@/types/notion";
 import { propertyValue } from "@/lib/notion";
 
@@ -17,22 +17,26 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fetchedRows, setFetchedRows] = useState<NotionPage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
 
   // Extract columns and rows from the node's children or fetchedRows
-  const nodeRows = (node?.children ?? []).map(child => child.page).filter(Boolean) as NotionPage[];
+  const nodeRows = useMemo(() => 
+    (node?.children ?? []).map(child => child.page).filter(Boolean) as NotionPage[],
+    [node?.children]
+  );
+  
   const rows = nodeRows.length > 0 ? nodeRows : fetchedRows;
   
   const allColumns = useMemo(
     () => Array.from(new Set([...(node?.columns ?? []), ...rows.flatMap(row => Object.keys(row.properties ?? {}))])),
     [node?.columns, rows]
   );
-  const columnKey = allColumns.join(",");
 
   useEffect(() => {
     if (!open || !node) return;
     
-    // If metadata has columns, config can open without loading rows.
-    if (allColumns.length === 0 && nodeRows.length === 0 && fetchedRows.length === 0 && token) {
+    // Fetch rows when they are not preloaded on the node.
+    if (nodeRows.length === 0 && fetchedRows.length === 0 && token) {
       setLoading(true);
       const dataSourceId = node.dataSourceId ?? node.id;
       fetch(`/api/notion/datasource/${dataSourceId}/rows`, {
@@ -47,22 +51,25 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [open, node, token, nodeRows.length, fetchedRows.length, allColumns.length]);
+  }, [open, node, token, nodeRows.length, fetchedRows.length]);
 
   useEffect(() => {
-    if (open && node) {
-      if (node.selectedColumns) {
+    if (open && node && !hasInitializedSelection) {
+      if (node.selectedColumns && node.selectedColumns.length > 0) {
         setSelected(new Set(node.selectedColumns));
-      } else {
+        setHasInitializedSelection(true);
+      } else if (allColumns.length > 0) {
         setSelected(new Set(allColumns));
+        setHasInitializedSelection(true);
       }
     }
-  }, [open, node, allColumns, columnKey]);
+  }, [open, node, allColumns, hasInitializedSelection]);
 
   // Reset state on close
   useEffect(() => {
     if (!open) {
       setFetchedRows([]);
+      setHasInitializedSelection(false);
     }
   }, [open]);
 
@@ -82,11 +89,11 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
     onClose();
   };
 
-  const previewRows = rows.slice(0, 3); // Preview first 3 rows
+  const visibleColumns = allColumns.filter(col => selected.has(col));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-5 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      <div className="flex max-h-[95vh] w-full max-w-[95vw] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         
         <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4">
           <div>
@@ -98,69 +105,68 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-          
-          {/* Sidebar: Column Selection */}
-          <div className="w-full overflow-y-auto border-r border-zinc-200 bg-zinc-50/50 p-6 lg:w-72">
-            <h3 className="mb-4 text-sm font-medium text-zinc-900">Export Columns</h3>
-            <div className="space-y-2">
-              {allColumns.map(col => {
-                const isSelected = selected.has(col);
-                return (
-                  <button
-                    key={col}
-                    onClick={() => toggleColumn(col)}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                      isSelected ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100"
-                    }`}
-                  >
-                    <span className="truncate">{col}</span>
-                    {isSelected && <Check className="h-4 w-4 shrink-0" />}
-                  </button>
-                );
-              })}
-              {allColumns.length === 0 && !loading && (
-                <p className="text-sm text-zinc-500">No columns found.</p>
-              )}
-              {loading && (
-                <p className="text-sm text-zinc-500 animate-pulse">Loading columns...</p>
-              )}
-            </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium text-zinc-900">Data Preview</h3>
+            <p className="text-xs text-zinc-500">
+              {visibleColumns.length} of {allColumns.length} columns selected
+            </p>
           </div>
-
-          {/* Main: Live Preview */}
-          <div className="flex flex-1 flex-col overflow-hidden bg-white p-6">
-            <h3 className="mb-4 text-sm font-medium text-zinc-900">Data Preview</h3>
             
             <div className="flex-1 overflow-auto rounded-lg border border-zinc-200">
-              <table className="w-full min-w-max text-left text-sm text-zinc-600">
-                <thead className="sticky top-0 border-b border-zinc-200 bg-zinc-50 text-xs uppercase text-zinc-500">
+              <table className="w-full text-left text-sm text-zinc-600">
+                <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs uppercase text-zinc-500">
                   <tr>
-                    {allColumns.filter(col => selected.has(col)).map(col => (
-                      <th key={col} className="px-4 py-3 font-medium">{col}</th>
+                    {allColumns.map(col => (
+                      <th key={col} className="p-0 font-medium align-middle">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleColumn(col);
+                          }}
+                          aria-pressed={selected.has(col)}
+                          className="flex w-full items-center px-4 py-3 transition-colors hover:bg-zinc-100"
+                        >
+                          <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-normal transition-colors whitespace-nowrap shadow-sm ${
+                            selected.has(col)
+                              ? "border-zinc-900 bg-zinc-900 text-white"
+                              : "border-zinc-300 bg-white text-zinc-600"
+                          }`}>
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                selected.has(col) ? "bg-white" : "bg-zinc-400"
+                              }`}
+                            />
+                            <span>{col}</span>
+                          </div>
+                        </button>
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 bg-white">
-                  {previewRows.map((row, idx) => (
+                  {rows.map((row, idx) => (
                     <tr key={idx} className="hover:bg-zinc-50">
-                      {allColumns.filter(col => selected.has(col)).map(col => (
-                        <td key={col} className="max-w-[200px] truncate px-4 py-3">
-                          {propertyValue(row.properties?.[col])}
+                      {allColumns.map(col => (
+                        <td key={col} className="max-w-0 truncate px-4 py-3">
+                          <span className={selected.has(col) ? "text-zinc-700" : "text-zinc-400"}>
+                            {propertyValue(row.properties?.[col])}
+                          </span>
                         </td>
                       ))}
                     </tr>
                   ))}
-                  {previewRows.length === 0 && !loading && (
+                  {rows.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={Math.max(selected.size, 1)} className="px-4 py-8 text-center text-zinc-500">
+                      <td colSpan={Math.max(allColumns.length, 1)} className="px-4 py-8 text-center text-zinc-500">
                         No rows to preview.
                       </td>
                     </tr>
                   )}
                   {loading && (
                     <tr>
-                      <td colSpan={Math.max(selected.size, 1)} className="px-4 py-8 text-center text-zinc-500 animate-pulse">
+                      <td colSpan={Math.max(allColumns.length, 1)} className="px-4 py-8 text-center text-zinc-500 animate-pulse">
                         Loading preview data...
                       </td>
                     </tr>
@@ -168,8 +174,6 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
                 </tbody>
               </table>
             </div>
-          </div>
-
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-zinc-200 bg-zinc-50 px-6 py-4">
