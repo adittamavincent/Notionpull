@@ -12,9 +12,9 @@ import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
 import { History, RefreshCw, LogOut } from "lucide-react";
 
-type DepthOption = "1" | "2" | "3" | "All";
+type DepthOption = "1" | "2" | "3" | "4" | "5" | "All";
 
-const depthOptions: DepthOption[] = ["1", "2", "3", "All"];
+const depthOptions: DepthOption[] = ["1", "2", "3", "4", "5", "All"];
 
 export default function Page() {
   const [tokens, setTokens] = useState<NotionTokenEntry[]>([]);
@@ -282,10 +282,10 @@ export default function Page() {
           
           const rowAlreadyInSelectedTable = node.kind === "row" && node.parentId && selected.has(node.parentId);
           if (rowAlreadyInSelectedTable && !blocks.length) {
-            items.push({ kind: node.kind, title: node.title, page: node.page, includeProperties: false });
-          } else {
-            items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable });
+            // Skip rows that are already in a database table and have no content
+            continue;
           }
+          items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable });
         }
         
         current++;
@@ -407,7 +407,7 @@ export default function Page() {
                         }}
                         disabled={loadingTree}
                       >
-                        Depth: {option}
+                        {option}
                       </button>
                     ))}
                   </div>
