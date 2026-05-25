@@ -580,7 +580,12 @@ function collectObjectIds(value: any, titleById: Map<string, string>) {
   if (!value || typeof value !== "object") return;
   if (value.type === "relation") {
     for (const relation of value.relation ?? []) {
-      if (relation.id && !titleById.has(relation.id)) titleById.set(relation.id, "");
+      if (!relation.id) continue;
+      if (relation.title) {
+        titleById.set(relation.id, relation.title);
+      } else if (!titleById.has(relation.id)) {
+        titleById.set(relation.id, "");
+      }
     }
   }
   if (value.type === "url") {

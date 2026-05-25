@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import type { TreeNodeData, NotionPage } from "@/types/notion";
 import { propertyValue } from "@/lib/notion";
@@ -16,6 +16,7 @@ type Props = {
 export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fetchedRows, setFetchedRows] = useState<NotionPage[]>([]);
+  const [titleById, setTitleById] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
 
@@ -25,12 +26,33 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
     [node?.children]
   );
   
-  const rows = nodeRows.length > 0 ? nodeRows : fetchedRows;
+  const rows = useMemo(
+    () => nodeRows.length > 0 ? nodeRows : fetchedRows,
+    [nodeRows, fetchedRows]
+  );
   
   const allColumns = useMemo(
     () => Array.from(new Set([...(node?.columns ?? []), ...rows.flatMap(row => Object.keys(row.properties ?? {}))])),
     [node?.columns, rows]
   );
+
+  const titleSeed = useMemo(() => {
+    const nextTitleById = new Map<string, string>();
+    for (const row of rows) {
+      if (row.id) {
+        const title = propertyValue(Object.values(row.properties ?? {}).find((prop: any) => prop?.type === "title"));
+        if (title) nextTitleById.set(row.id, title);
+      }
+      collectRelationIds(row.properties, nextTitleById);
+    }
+
+    return {
+      titleById: nextTitleById,
+      missingIds: Array.from(nextTitleById.entries()).filter(([, title]) => !title).map(([id]) => id)
+    };
+  }, [rows]);
+
+  const propertyValueOptions = useMemo(() => ({ titleById }), [titleById]);
 
   useEffect(() => {
     if (!open || !node) return;
@@ -54,6 +76,36 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
   }, [open, node, token, nodeRows.length, fetchedRows.length]);
 
   useEffect(() => {
+    if (!open || !token || rows.length === 0) return;
+
+    if (!titleSeed.missingIds.length) {
+      setTitleById(titleSeed.titleById);
+      return;
+    }
+
+    const nextTitleById = new Map(titleSeed.titleById);
+    let cancelled = false;
+    Promise.all(titleSeed.missingIds.map(async (id) => {
+      try {
+        const res = await fetch(`/api/notion/detect?id=${encodeURIComponent(id)}`, {
+          headers: { "x-notion-token": token }
+        });
+        if (!res.ok) throw new Error("Title fetch failed");
+        const data = await res.json();
+        nextTitleById.set(id, data.title ?? "");
+      } catch {
+        nextTitleById.set(id, "");
+      }
+    })).then(() => {
+      if (!cancelled) setTitleById(new Map(nextTitleById));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, token, rows.length, titleSeed]);
+
+  useEffect(() => {
     if (open && node && !hasInitializedSelection) {
       if (node.selectedColumns && node.selectedColumns.length > 0) {
         setSelected(new Set(node.selectedColumns));
@@ -69,27 +121,32 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
   useEffect(() => {
     if (!open) {
       setFetchedRows([]);
+      setTitleById(new Map());
       setHasInitializedSelection(false);
     }
   }, [open]);
 
-  if (!open || !node) return null;
-
-  const toggleColumn = (col: string) => {
+  const toggleColumn = useCallback((col: string) => {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(col)) next.delete(col);
       else next.add(col);
       return next;
     });
-  };
+  }, []);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
+    if (!node) return;
     onSave(node.id, Array.from(selected));
     onClose();
-  };
+  }, [node, onClose, onSave, selected]);
 
-  const visibleColumns = allColumns.filter(col => selected.has(col));
+  const visibleColumns = useMemo(
+    () => allColumns.filter(col => selected.has(col)),
+    [allColumns, selected]
+  );
+
+  if (!open || !node) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-5 backdrop-blur-sm">
@@ -151,7 +208,7 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
                       {allColumns.map(col => (
                         <td key={col} className="max-w-0 truncate px-4 py-3">
                           <span className={selected.has(col) ? "text-zinc-700" : "text-zinc-400"}>
-                            {propertyValue(row.properties?.[col])}
+                            {propertyValue(row.properties?.[col], propertyValueOptions)}
                           </span>
                         </td>
                       ))}
@@ -188,4 +245,25 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
       </div>
     </div>
   );
+}
+
+function collectRelationIds(properties: Record<string, any> | undefined, titleById: Map<string, string>) {
+  for (const prop of Object.values(properties ?? {})) collectRelationIdsFromValue(prop, titleById);
+}
+
+function collectRelationIdsFromValue(value: any, titleById: Map<string, string>) {
+  if (!value || typeof value !== "object") return;
+  if (value.type === "relation") {
+    for (const relation of value.relation ?? []) {
+      if (!relation.id) continue;
+      if (relation.title) {
+        titleById.set(relation.id, relation.title);
+      } else if (!titleById.has(relation.id)) {
+        titleById.set(relation.id, "");
+      }
+    }
+  }
+  if (value.type === "rollup" && value.rollup?.type === "array") {
+    for (const item of value.rollup.array ?? []) collectRelationIdsFromValue(item, titleById);
+  }
 }
