@@ -117,14 +117,18 @@ export default function Page() {
     setLoadingTree(true);
     setError("");
     
-    const cacheKey = `${object.id}-${currentDepth}`;
+    const cacheKey = treeCacheKey(object.id, currentDepth);
     
-    if (!forceRefresh && treeCache.current.has(cacheKey)) {
-      setNodes([treeCache.current.get(cacheKey)!]);
-      setLoadingTree(false);
-      return;
+    if (!forceRefresh) {
+      const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth);
+      if (cached) {
+        treeCache.current.set(cacheKey, cached);
+        setNodes([cached]);
+        setLoadingTree(false);
+        return;
+      }
     }
-    
+
     // Clear selection if it's a completely new root (not just depth change)
     if (!detected || detected.id !== object.id) {
       setSelected(new Set());
@@ -159,7 +163,7 @@ export default function Page() {
 
   function handleRefresh() {
     if (!detected) return;
-    const cacheKey = `${detected.id}-${depth}`;
+    const cacheKey = treeCacheKey(detected.id, depth);
     treeCache.current.delete(cacheKey);
     void loadTree(detected, depth, true);
   }
@@ -205,7 +209,7 @@ export default function Page() {
     
     // Also update cache so it persists across depth changes
     if (detected) {
-      const cacheKey = `${detected.id}-${depth}`;
+      const cacheKey = treeCacheKey(detected.id, depth);
       if (treeCache.current.has(cacheKey)) {
         treeCache.current.set(cacheKey, updatedNodes[0]);
       }
@@ -473,6 +477,40 @@ export default function Page() {
 }
 
 // Data Fetching logic (kept same except TreeNodeData modifications)
+
+function treeCacheKey(id: string, depth: DepthOption): string {
+  return `${id}-${depth}`;
+}
+
+function depthValue(depth: DepthOption): number {
+  return depth === "All" ? Infinity : Number(depth);
+}
+
+function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption): TreeNodeData | null {
+  const exact = cache.get(treeCacheKey(rootId, depth));
+  if (exact) return exact;
+
+  const requestedDepth = depthValue(depth);
+  for (const option of depthOptions) {
+    if (depthValue(option) <= requestedDepth) continue;
+
+    const deeperTree = cache.get(treeCacheKey(rootId, option));
+    if (deeperTree) return cloneTreeToDepth(deeperTree, requestedDepth);
+  }
+
+  return null;
+}
+
+function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
+  if (node.depth >= maxDepth || !node.children?.length) {
+    return { ...node, children: undefined };
+  }
+
+  return {
+    ...node,
+    children: node.children.map((child) => cloneTreeToDepth(child, maxDepth))
+  };
+}
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number): Promise<TreeNodeData> {
   try {
