@@ -11,6 +11,7 @@ export type DetectedObject = {
   id: string;
   title: string;
   dataSourceId?: string;
+  columns?: string[];
 };
 
 export type TreeNodeKind = "page" | "database" | "data_source" | "row";
@@ -25,6 +26,8 @@ export type TreeNodeData = {
   page?: NotionPage;
   children?: TreeNodeData[];
   error?: string;
+  columns?: string[];
+  selectedColumns?: string[];
 };
 
 export type NotionRichText = {

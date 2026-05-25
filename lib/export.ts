@@ -1,7 +1,7 @@
 import type { NotionBlock, NotionPage } from "@/types/notion";
 import { propertyValue, type PropertyValueOptions } from "@/lib/notion";
 
-export type DatabaseExportItem = { kind: "database" | "data_source"; title: string; rows: NotionPage[] };
+export type DatabaseExportItem = { kind: "database" | "data_source"; title: string; rows: NotionPage[]; columns?: string[]; selectedColumns?: string[] };
 export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[] };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
@@ -10,7 +10,7 @@ export type ExportOptions = PropertyValueOptions;
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
   return items.map((item) => {
     if (isDatabaseItem(item)) {
-      return databaseToMarkdown(item.title, item.rows, options);
+      return databaseToMarkdown(item, options);
     }
     const heading = `# ${item.title}`;
     const properties = item.page ? pagePropertiesToMarkdown(item.page, options) : "";
@@ -22,7 +22,7 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
 export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
   return items.map((item) => {
     if (isDatabaseItem(item)) {
-      return databaseToCsv(item.title, item.rows, options);
+      return databaseToCsv(item, options);
     }
     const rows = [["property", "value"]];
     if (item.page?.properties) {
@@ -38,28 +38,34 @@ function isDatabaseItem(item: ExportItem): item is DatabaseExportItem {
   return item.kind === "database" || item.kind === "data_source";
 }
 
-function databaseToMarkdown(title: string, rows: NotionPage[], options: ExportOptions): string {
-  const columns = databaseColumns(rows);
-  const head = [`## ${title}`];
-  if (!rows.length) return `${head[0]}\n\n_No rows._`;
+function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): string {
+  const columns = databaseColumns(item);
+  const head = [`## ${item.title}`];
+  if (!columns.length) return `${head[0]}\n\n_No columns._`;
   head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
   head.push(`| ${columns.map(() => "---").join(" | ")} |`);
-  for (const row of rows) {
+  for (const row of item.rows) {
     head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
   }
   return head.join("\n");
 }
 
-function databaseToCsv(title: string, rows: NotionPage[], options: ExportOptions): string {
-  const columns = databaseColumns(rows);
-  const lines = [`# ${title}`, csvRow(columns)];
-  for (const row of rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
+function databaseToCsv(item: DatabaseExportItem, options: ExportOptions): string {
+  const columns = databaseColumns(item);
+  const lines = [`# ${item.title}`, csvRow(columns)];
+  for (const row of item.rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
   return lines.join("\n");
 }
 
-function databaseColumns(rows: NotionPage[]): string[] {
+function databaseColumns(item: DatabaseExportItem): string[] {
+  if (item.selectedColumns && item.selectedColumns.length > 0) {
+    return item.selectedColumns;
+  }
+  if (item.columns && item.columns.length > 0) {
+    return item.columns;
+  }
   const seen = new Set<string>();
-  for (const row of rows) {
+  for (const row of item.rows) {
     for (const column of Object.keys(row.properties ?? {})) seen.add(column);
   }
   return [...seen];

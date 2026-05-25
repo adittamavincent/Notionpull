@@ -13,7 +13,8 @@ export async function GET(request: Request) {
         type: "database",
         id: database.id,
         title: databaseTitle(database),
-        dataSourceId: database.data_sources?.[0]?.id
+        dataSourceId: database.data_sources?.[0]?.id,
+        columns: Object.keys(database.properties ?? {})
       });
     } catch (error) {
       if (!isProbeMiss(error)) throw error;
@@ -25,7 +26,8 @@ export async function GET(request: Request) {
         type: "data_source",
         id: dataSource.id,
         title: dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source",
-        dataSourceId: dataSource.id
+        dataSourceId: dataSource.id,
+        columns: Object.keys(dataSource.properties ?? {})
       });
     } catch (error) {
       if (!isProbeMiss(error)) throw error;
