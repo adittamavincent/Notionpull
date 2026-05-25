@@ -48,6 +48,9 @@ export default function Page() {
 
   // Caching
   const treeCache = useRef<Map<string, TreeNodeData>>(new Map());
+  const pageChildrenCache = useRef<Map<string, Promise<PageChildrenResponse>>>(new Map());
+  const databaseCache = useRef<Map<string, Promise<DatabaseResponse>>>(new Map());
+  const rowsCache = useRef<Map<string, Promise<NotionPage[]>>>(new Map());
   const titleCache = useRef<Map<string, string>>(new Map());
 
   useEffect(() => refreshTokens(), []);
@@ -116,9 +119,15 @@ export default function Page() {
     if (!activeToken || !object) return;
     setLoadingTree(true);
     setError("");
+    if (forceRefresh) {
+      pageChildrenCache.current.clear();
+      databaseCache.current.clear();
+      rowsCache.current.clear();
+    }
     
     const cacheKey = treeCacheKey(object.id, currentDepth);
     
+    let cachedBase: TreeNodeData | null = null;
     if (!forceRefresh) {
       const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth);
       if (cached) {
@@ -127,6 +136,7 @@ export default function Page() {
         setLoadingTree(false);
         return;
       }
+      cachedBase = getNearestShallowCachedTree(treeCache.current, object.id, currentDepth);
     }
 
     // Clear selection if it's a completely new root (not just depth change)
@@ -136,14 +146,19 @@ export default function Page() {
     
     try {
       const maxDepth = currentDepth === "All" ? Infinity : Number(currentDepth);
-      const root = await buildNode(activeToken.token, {
+      const rootSeed: TreeNodeData = cachedBase ?? {
         id: object.id,
         title: object.title,
         kind: object.type,
         depth: 0,
         dataSourceId: object.dataSourceId,
         columns: object.columns
-      }, maxDepth);
+      };
+      const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
+        pageChildren: pageChildrenCache.current,
+        databases: databaseCache.current,
+        rows: rowsCache.current
+      });
       
       treeCache.current.set(cacheKey, root);
       setNodes([root]);
@@ -502,6 +517,25 @@ function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string,
   return null;
 }
 
+function getNearestShallowCachedTree(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption): TreeNodeData | null {
+  const requestedDepth = depthValue(depth);
+  let bestTree: TreeNodeData | null = null;
+  let bestDepth = -1;
+
+  for (const option of depthOptions) {
+    const optionDepth = depthValue(option);
+    if (optionDepth >= requestedDepth || optionDepth <= bestDepth) continue;
+
+    const tree = cache.get(treeCacheKey(rootId, option));
+    if (tree) {
+      bestTree = tree;
+      bestDepth = optionDepth;
+    }
+  }
+
+  return bestTree ? cloneTree(bestTree) : null;
+}
+
 function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
   if (node.depth >= maxDepth || !node.children?.length) {
     return { ...node, children: undefined };
@@ -513,31 +547,57 @@ function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
   };
 }
 
-async function buildNode(token: string, node: TreeNodeData, maxDepth: number): Promise<TreeNodeData> {
+function cloneTree(node: TreeNodeData): TreeNodeData {
+  return {
+    ...node,
+    children: node.children?.map(cloneTree)
+  };
+}
+
+type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database"; title: string }> };
+type DatabaseResponse = { dataSourceId: string; title: string; columns?: string[] };
+type BuildMemo = {
+  pageChildren: Map<string, Promise<PageChildrenResponse>>;
+  databases: Map<string, Promise<DatabaseResponse>>;
+  rows: Map<string, Promise<NotionPage[]>>;
+};
+
+async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
   try {
     if (node.kind === "page" || node.kind === "row") {
       if (node.depth >= maxDepth) return node;
-      const body = await apiFetch<{ results: Array<{ id: string; type: "page" | "database"; title: string }> }>(token, `/api/notion/page/${node.id}/children`);
-      node.children = await Promise.all(body.results.map((child) => buildNode(token, {
-        id: child.id,
-        title: child.title,
-        kind: child.type,
-        depth: node.depth + 1,
-        parentId: node.id
-      }, maxDepth)));
+      if (!node.children) {
+        const body = await memoPageChildren(token, node.id, memo);
+        node.children = body.results.map((child) => ({
+          id: child.id,
+          title: child.title,
+          kind: child.type,
+          depth: node.depth + 1,
+          parentId: node.id
+        }));
+      }
+      node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
     if (node.kind === "database") {
-      const database = await apiFetch<{ dataSourceId: string; title: string; columns?: string[] }>(token, `/api/notion/database/${node.id}`);
-      node.dataSourceId = database.dataSourceId;
-      node.columns = database.columns ?? node.columns;
+      if (!node.dataSourceId || !node.columns) {
+        const database = await memoDatabase(token, node.id, memo);
+        node.dataSourceId = database.dataSourceId;
+        node.columns = database.columns ?? node.columns;
+      }
       if (node.depth + 1 > maxDepth) return node;
-      const rows = await rowNodes(token, database.dataSourceId, node.depth + 1, node.id);
-      node.children = await Promise.all(rows.map((row) => buildNode(token, row, maxDepth)));
+      if (!node.children) {
+        const rows = await rowNodes(token, node.dataSourceId, node.depth + 1, node.id, memo);
+        node.children = rows;
+      }
+      node.children = await Promise.all(node.children.map((row) => buildNode(token, row, maxDepth, memo)));
     }
     if (node.kind === "data_source") {
       if (node.depth + 1 > maxDepth) return node;
-      const rows = await rowNodes(token, node.dataSourceId ?? node.id, node.depth + 1, node.id);
-      node.children = await Promise.all(rows.map((row) => buildNode(token, row, maxDepth)));
+      if (!node.children) {
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, node.depth + 1, node.id, memo);
+        node.children = rows;
+      }
+      node.children = await Promise.all(node.children.map((row) => buildNode(token, row, maxDepth, memo)));
     }
   } catch (err) {
     node.error = errorMessage(err);
@@ -545,8 +605,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number): P
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, depth: number, parentId: string): Promise<TreeNodeData[]> {
-  const rows = await fetchAllRows(token, dataSourceId);
+async function rowNodes(token: string, dataSourceId: string, depth: number, parentId: string, memo: BuildMemo): Promise<TreeNodeData[]> {
+  const rows = await memoRows(token, dataSourceId, memo);
   return rows.map((row) => ({
     id: row.id,
     title: firstTitleProperty(row),
@@ -555,6 +615,34 @@ async function rowNodes(token: string, dataSourceId: string, depth: number, pare
     parentId,
     page: row
   }));
+}
+
+function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promise<PageChildrenResponse> {
+  return memoFetch(memo.pageChildren, `${token}:page:${pageId}`, () => (
+    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children`)
+  ));
+}
+
+function memoDatabase(token: string, databaseId: string, memo: BuildMemo): Promise<DatabaseResponse> {
+  return memoFetch(memo.databases, `${token}:database:${databaseId}`, () => (
+    apiFetch<DatabaseResponse>(token, `/api/notion/database/${databaseId}`)
+  ));
+}
+
+function memoRows(token: string, dataSourceId: string, memo: BuildMemo): Promise<NotionPage[]> {
+  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}`, () => fetchAllRows(token, dataSourceId));
+}
+
+function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  const request = fetcher().catch((err) => {
+    cache.delete(key);
+    throw err;
+  });
+  cache.set(key, request);
+  return request;
 }
 
 async function fetchAllRows(token: string, dataSourceId: string): Promise<NotionPage[]> {

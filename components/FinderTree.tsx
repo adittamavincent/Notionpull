@@ -17,29 +17,11 @@ export function flattenTree(nodes: TreeNodeData[]): TreeNodeData[] {
   return nodes.flatMap((node) => [node, ...flattenTree(node.children ?? [])]);
 }
 
-function getSelectionState(node: TreeNodeData, selected: Set<string>): "checked" | "indeterminate" | "unchecked" {
-  const descendants = flattenTree(node.children ?? []);
-
-  if (!descendants.length) {
-    return selected.has(node.id) ? "checked" : "unchecked";
-  }
-
-  const selectedCount = descendants.filter((descendant) => selected.has(descendant.id)).length;
-
-  if (selectedCount === 0) {
-    return selected.has(node.id) ? "checked" : "unchecked";
-  }
-
-  if (selectedCount === descendants.length) {
-    return "checked";
-  }
-
-  return "indeterminate";
-}
+type SelectionState = "checked" | "indeterminate" | "unchecked";
 
 type RowProps = {
   node: TreeNodeData;
-  selected: Set<string>;
+  selectionState: SelectionState;
   collapsed: Set<string>;
   onToggleCollapse: (id: string) => void;
   onToggle: (node: TreeNodeData, checked: boolean) => void;
@@ -47,11 +29,10 @@ type RowProps = {
   style?: React.CSSProperties;
 };
 
-function TreeRow({ node, selected, collapsed, onToggleCollapse, onToggle, onConfigureDatabase, style }: RowProps) {
+function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, onConfigureDatabase, style }: RowProps) {
   const hasChildren = node.children && node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
   const isDatabase = node.kind === "database" || node.kind === "data_source";
-  const selectionState = getSelectionState(node, selected);
   const checkboxRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -153,33 +134,40 @@ function TreeRow({ node, selected, collapsed, onToggleCollapse, onToggle, onConf
 }
 
 export function FinderTree({ nodes, selected, loading, onToggle, onConfigureDatabase }: Props) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  // By default we might want to expand all nodes so it behaves like the old flat tree,
-  // but a real Finder view lets you toggle. Let's auto-expand nodes that have children initially,
-  // or just let them be expanded if they are in the 'expanded' set. To keep it simple, we'll
-  // compute the visible flat list based on expanded state.
-  // Actually, wait, depth options 1, 2, 3 "All" dictate how deep we fetched.
-  // We can just show what we fetched, or let the user collapse.
-  // Let's implement true collapsible nodes. By default, auto-expand everything that is fetched.
-
-  const allParentIds = useMemo(() => {
-    const parentIds = new Set<string>();
-    const gather = (list: TreeNodeData[]) => {
-      for (const node of list) {
-        if (node.children?.length) {
-          parentIds.add(node.id);
-          gather(node.children);
-        }
-      }
-    };
-    gather(nodes);
-    return parentIds;
-  }, [nodes]);
-
-  // Merge auto-expanded with manually collapsed (if we wanted to track collapsed instead).
-  // For simplicity, we just use a `collapsed` set to track what user hides.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const selectionStateById = useMemo(() => {
+    const states = new Map<string, SelectionState>();
+
+    const visit = (node: TreeNodeData): { total: number; selectedCount: number } => {
+      let total = 0;
+      let selectedCount = 0;
+
+      for (const child of node.children ?? []) {
+        total += 1;
+        if (selected.has(child.id)) selectedCount += 1;
+
+        const childResult = visit(child);
+        total += childResult.total;
+        selectedCount += childResult.selectedCount;
+      }
+
+      if (total === 0) {
+        states.set(node.id, selected.has(node.id) ? "checked" : "unchecked");
+      } else if (selectedCount === 0) {
+        states.set(node.id, selected.has(node.id) ? "checked" : "unchecked");
+      } else if (selectedCount === total) {
+        states.set(node.id, "checked");
+      } else {
+        states.set(node.id, "indeterminate");
+      }
+
+      return { total, selectedCount };
+    };
+
+    for (const node of nodes) visit(node);
+    return states;
+  }, [nodes, selected]);
 
   const toggleCollapse = (id: string) => {
     setCollapsed((prev) => {
@@ -233,7 +221,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
           <TreeRow
             key={node.id}
             node={node}
-            selected={selected}
+            selectionState={selectionStateById.get(node.id) ?? "unchecked"}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             onToggle={onToggle}
@@ -253,7 +241,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
             <TreeRow
               key={node.id}
               node={node}
-              selected={selected}
+              selectionState={selectionStateById.get(node.id) ?? "unchecked"}
               collapsed={collapsed}
               onToggleCollapse={toggleCollapse}
               onToggle={onToggle}
