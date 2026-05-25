@@ -28,15 +28,13 @@ export function ExportProgress({ open, total, current }: Props) {
   if (!open) return null;
 
   const MAX_BLOCKS = 36;
-  const columns = 6;
-  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 p-5 backdrop-blur-sm transition-opacity">
       <div className="flex w-full max-w-sm flex-col items-center rounded-2xl bg-white p-8 shadow-2xl ring-1 ring-zinc-200">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mb-8 flex h-32 w-32 flex-col-reverse flex-wrap content-start gap-1"
+          className="mb-8 grid h-32 w-32 grid-cols-6 place-content-center gap-1"
         >
           {Array.from({ length: MAX_BLOCKS }).map((_, i) => {
             const isFilled = blocks.includes(i);
@@ -50,7 +48,7 @@ export function ExportProgress({ open, total, current }: Props) {
                   backgroundColor: isFilled ? "#18181b" : "#e4e4e7" // zinc-900 vs zinc-200
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="h-[18%] w-[15%] rounded-sm"
+                className="h-4 w-4 rounded-sm"
               />
             );
           })}
