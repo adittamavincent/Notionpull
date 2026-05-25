@@ -8,6 +8,11 @@ export type ExportItem = DatabaseExportItem | PageExportItem;
 export type ExportOptions = PropertyValueOptions;
 
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
+  const pageItems = items.filter((candidate): candidate is PageExportItem => !isDatabaseItem(candidate));
+  if (pageItems.length > 1 && pageItems.length === items.length) {
+    return pageItemsToMarkdownTable(pageItems, options);
+  }
+
   return items.map((item) => {
     if (isDatabaseItem(item)) {
       return databaseToMarkdown(item, options);
@@ -20,6 +25,11 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
 }
 
 export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
+  const pageItems = items.filter((candidate): candidate is PageExportItem => !isDatabaseItem(candidate));
+  if (pageItems.length > 1 && pageItems.length === items.length) {
+    return pageItemsToCsvTable(pageItems, options);
+  }
+
   return items.map((item) => {
     if (isDatabaseItem(item)) {
       return databaseToCsv(item, options);
@@ -55,6 +65,40 @@ function databaseToCsv(item: DatabaseExportItem, options: ExportOptions): string
   const lines = [`# ${item.title}`, csvRow(columns)];
   for (const row of item.rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
   return lines.join("\n");
+}
+
+function pageItemsToMarkdownTable(items: PageExportItem[], options: ExportOptions): string {
+  const columns = ["Title", ...collectPagePropertyColumns(items)];
+  const lines = ["# Selected rows", `| ${columns.map(escapeMarkdown).join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`];
+
+  for (const item of items) {
+    const values = [item.title, ...columns.slice(1).map((column) => propertyValue(item.page?.properties?.[column], options))];
+    lines.push(`| ${values.map((value) => escapeMarkdown(value)).join(" | ")} |`);
+  }
+
+  return lines.join("\n");
+}
+
+function pageItemsToCsvTable(items: PageExportItem[], options: ExportOptions): string {
+  const columns = ["Title", ...collectPagePropertyColumns(items)];
+  const lines = ["# Selected rows", csvRow(columns)];
+
+  for (const item of items) {
+    const values = [item.title, ...columns.slice(1).map((column) => propertyValue(item.page?.properties?.[column], options))];
+    lines.push(csvRow(values));
+  }
+
+  return lines.join("\n");
+}
+
+function collectPagePropertyColumns(items: PageExportItem[]): string[] {
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    for (const column of Object.keys(item.page?.properties ?? {})) seen.add(column);
+  }
+
+  return [...seen];
 }
 
 function databaseColumns(item: DatabaseExportItem): string[] {
