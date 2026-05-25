@@ -72,7 +72,7 @@ function TreeRow({ node, selected, collapsed, onToggleCollapse, onToggle, onConf
 
   return (
     <div
-      className="group flex h-10 items-center gap-2 border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50"
+      className="group relative flex h-10 items-center gap-2 border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50"
       style={{ ...style, paddingLeft: `${8 + node.depth * 24}px` }}
     >
       <button
@@ -105,10 +105,11 @@ function TreeRow({ node, selected, collapsed, onToggleCollapse, onToggle, onConf
       {isDatabase && onConfigureDatabase && (
         <button
           onClick={() => onConfigureDatabase(node)}
-          className="hidden items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 shadow-sm transition hover:bg-zinc-50 group-hover:flex"
+          className="pointer-events-none absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 opacity-0 shadow-sm transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100"
+          aria-label={`Configure ${node.title}`}
         >
           <Settings2 className="h-3 w-3" />
-          Config
+          Click to config
         </button>
       )}
 
