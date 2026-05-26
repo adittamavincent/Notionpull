@@ -60,86 +60,100 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
 
   return (
     <div
-      className="group relative flex h-10 items-center gap-2 border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50"
-      style={{ ...style, paddingLeft: `${8 + node.depth * 24}px` }}
+      className="group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50 cursor-pointer select-none"
+      style={style}
       onMouseEnter={() => {
         if (dragInfo?.isDragging) {
           dragInfo.onDragOver(node);
         }
       }}
+      onMouseDown={(event) => {
+        if (event.button === 0) { // Left click
+          event.preventDefault(); // Prevent text selection and browser drag
+          const nextChecked = selectionState !== "checked";
+          onToggle(node, nextChecked); 
+          dragInfo?.startDragging(node.id, nextChecked);
+        }
+      }}
     >
-      <button
-        className={`flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-200 ${hasChildren ? "text-zinc-500" : "invisible"}`}
-        onClick={() => onToggleCollapse(node.id)}
+      {/* Indentation & Collapse Button */}
+      <div 
+        className="flex h-full shrink-0 items-center" 
+        style={{ width: `${node.depth * 24 + 8}px` }}
       >
-        {hasChildren && (isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-      </button>
-
-      <input
-        ref={checkboxRef}
-        type="checkbox"
-        className="h-4 w-4 rounded border-zinc-300 accent-zinc-900"
-        checked={selectionState === "checked"}
-        onClick={(event) => {
-          // Prevent browser from toggling checkbox state twice
-          event.stopPropagation();
-        }}
-        onChange={() => {
-          // No-op: we handle toggling manually via onMouseDown/onDragOver
-        }}
-        onMouseDown={(event) => {
-          if (event.button === 0) { // Left click
-            const nextChecked = selectionState !== "checked";
-            onToggle(node, nextChecked); 
-            dragInfo?.startDragging(node.id, nextChecked);
-          }
-        }}
-        aria-label={`Select ${node.title}`}
-        aria-checked={selectionState === "indeterminate" ? "mixed" : selectionState === "checked"}
-      />
-
-      <span className="flex items-center justify-center" aria-hidden>
-        {getIcon(node.kind)}
-      </span>
-
-      <div className="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
-        <span className="truncate font-medium text-zinc-700 shrink-0">{node.title || "Untitled"}</span>
-        {isDatabase && (
-          <div 
-            className="min-w-0 flex-1 flex items-center text-xs text-zinc-400 font-normal py-0.5 overflow-hidden whitespace-nowrap" 
-            title={node.selectedColumns?.join(", ") || "All columns"}
-          >
-            {(() => {
-              const selected = node.selectedColumns;
-              const allCount = node.columns?.length || 0;
-              if (!selected || (allCount > 0 && selected.length === allCount)) return <span>(all)</span>;
-              if (selected.length === 0) return <span>(none)</span>;
-              if (selected.length === 1) return <span className="truncate">({selected[0]})</span>;
-              if (selected.length === 2) return <span className="truncate">({selected[0]}, {selected[1]})</span>;
-              
-              const first = selected[0];
-              const last = selected[selected.length - 1];
-              const middle = selected.slice(1, -1).join(", ");
-              
-              return (
-                <div className="flex min-w-0 overflow-hidden">
-                  <span className="shrink-0">({first},&nbsp;</span>
-                  <span className="truncate">{middle}</span>
-                  <span className="shrink-0">,&nbsp;{last})</span>
-                </div>
-              );
-            })()}
-          </div>
-        )}
+        <button
+          className={`ml-auto flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-200 ${hasChildren ? "text-zinc-500" : "invisible"}`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapse(node.id);
+          }}
+        >
+          {hasChildren && (isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+        </button>
       </div>
 
-      <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-        {node.kind.replace("_", " ")}
-      </span>
+      {/* Checkbox "Grace Zone" Square */}
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          className="h-4 w-4 rounded border-zinc-300 accent-zinc-900 pointer-events-none"
+          checked={selectionState === "checked"}
+          readOnly
+          aria-label={`Select ${node.title}`}
+          aria-checked={selectionState === "indeterminate" ? "mixed" : selectionState === "checked"}
+        />
+      </div>
+
+      <div className="flex flex-1 items-center gap-2 min-w-0">
+        <span className="flex items-center justify-center shrink-0" aria-hidden>
+          {getIcon(node.kind)}
+        </span>
+
+        <div className="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
+          <span className="truncate font-medium text-zinc-700 shrink-0">{node.title || "Untitled"}</span>
+          {isDatabase && (
+            <div 
+              className="min-w-0 flex-1 flex items-center text-xs text-zinc-400 font-normal py-0.5 overflow-hidden whitespace-nowrap" 
+              title={node.selectedColumns?.join(", ") || "All columns"}
+            >
+              {(() => {
+                const selected = node.selectedColumns;
+                const allCount = node.columns?.length || 0;
+                if (!selected || (allCount > 0 && selected.length === allCount)) return <span>(all)</span>;
+                if (selected.length === 0) return <span>(none)</span>;
+                if (selected.length === 1) return <span className="truncate">({selected[0]})</span>;
+                if (selected.length === 2) return <span className="truncate">({selected[0]}, {selected[1]})</span>;
+                
+                const first = selected[0];
+                const last = selected[selected.length - 1];
+                const middle = selected.slice(1, -1).join(", ");
+                
+                return (
+                  <div className="flex min-w-0 overflow-hidden">
+                    <span className="shrink-0">({first},&nbsp;</span>
+                    <span className="truncate">{middle}</span>
+                    <span className="shrink-0">,&nbsp;{last})</span>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+
+        <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 shrink-0">
+          {node.kind.replace("_", " ")}
+        </span>
+      </div>
 
       {isDatabase && onConfigureDatabase && (
         <button
-          onClick={() => onConfigureDatabase(node)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onConfigureDatabase(node);
+          }}
           className="pointer-events-none absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 opacity-0 shadow-sm transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100"
           aria-label={`Configure ${node.title}`}
         >
