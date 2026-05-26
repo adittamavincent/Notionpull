@@ -16,13 +16,30 @@ export async function GET(request: Request, { params }: Params) {
     } while (start_cursor);
 
     return Response.json({
-      results: blocks.map((block) => ({
-        id: block.id,
-        type: block.type === "child_page" ? "page" : (block.type === "child_database" ? "database" : "block"),
-        kind: block.type,
-        title: blockTitle(block),
-        hasChildren: block.has_children
-      }))
+      results: blocks
+        .map((block) => {
+          const type = block.type === "child_page" ? "page" : (block.type === "child_database" ? "database" : "block");
+          const title = blockTitle(block);
+          return {
+            id: block.id,
+            type,
+            kind: block.type,
+            title,
+            hasChildren: block.has_children
+          };
+        })
+        .filter((node) => {
+          // Always keep pages and databases
+          if (node.type !== "block") return true;
+          // Keep blocks that have text content
+          if (node.title) return true;
+          // Keep blocks that have children (even if they have no text themselves, they contain things)
+          if (node.hasChildren) return true;
+          // Keep special visual blocks
+          if (["divider", "image", "video", "file", "pdf", "equation"].includes(node.kind)) return true;
+          
+          return false;
+        })
     });
   } catch (error) {
     return notionErrorResponse(error);

@@ -30,7 +30,7 @@ function formatCompactNotionId(compactId: string): string {
 }
 
 export function plainText(richText?: NotionRichText[]): string {
-  return richText?.map((part) => part.plain_text ?? "").join("") ?? "";
+  return richText?.map((part) => part.plain_text ?? "").join("").trim() ?? "";
 }
 
 export function databaseTitle(database: NotionDatabase): string {
@@ -148,7 +148,7 @@ export function blockTitle(block: any): string {
   
   const content = block[block.type];
   if (content?.rich_text) {
-    return plainText(content.rich_text) || "Empty block";
+    return plainText(content.rich_text);
   }
   
   if (block.type === "divider") return "Divider";
@@ -160,7 +160,7 @@ export function blockTitle(block: any): string {
   if (block.type === "breadcrumb") return "Breadcrumb";
   if (block.type === "table_of_contents") return "Table of Contents";
   
-  return `[${block.type.replace(/_/g, " ")}]`;
+  return "";
 }
 
 export async function notionFetch<T>(

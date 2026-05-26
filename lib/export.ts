@@ -209,6 +209,8 @@ function blockToXml(block: NotionBlock): string {
       return "";
   }
 
+  if (!text && children.length === 0) return "";
+
   if (children.length === 0) return `<${tag}${attributes}>${escapeXmlText(text)}</${tag}>`;
 
   const lines = [`<${tag}${attributes}>`];
@@ -221,7 +223,7 @@ function blockToXml(block: NotionBlock): string {
 function richTextToPlainText(richText: any[] = []): string {
   return richText.map((part) => {
     return part.plain_text ?? "";
-  }).join("");
+  }).join("").trim();
 }
 
 function csvRow(values: string[]): string {
