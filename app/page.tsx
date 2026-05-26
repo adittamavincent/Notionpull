@@ -556,7 +556,7 @@ function cloneTree(node: TreeNodeData): TreeNodeData {
   };
 }
 
-type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database"; title: string }> };
+type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database" | "block"; title: string }> };
 type DatabaseResponse = { dataSourceId: string; title: string; columns?: string[]; properties?: Record<string, any> };
 type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
@@ -566,14 +566,14 @@ type BuildMemo = {
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
   try {
-    if (node.kind === "page" || node.kind === "row") {
+    if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
       if (node.depth >= maxDepth) return node;
       if (!node.children) {
         const body = await memoPageChildren(token, node.id, memo);
-        node.children = body.results.map((child) => ({
+        node.children = body.results.map((child: any) => ({
           id: child.id,
           title: child.title,
-          kind: child.type,
+          kind: child.type as any,
           depth: node.depth + 1,
           parentId: node.id
         }));

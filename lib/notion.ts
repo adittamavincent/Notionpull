@@ -145,7 +145,22 @@ export function firstTitleProperty(page: NotionPage): string {
 export function blockTitle(block: any): string {
   if (block.type === "child_page") return block.child_page?.title ?? "Untitled page";
   if (block.type === "child_database") return block.child_database?.title ?? "Untitled database";
-  return "Untitled";
+  
+  const content = block[block.type];
+  if (content?.rich_text) {
+    return plainText(content.rich_text) || "Empty block";
+  }
+  
+  if (block.type === "divider") return "Divider";
+  if (block.type === "image") return "Image block";
+  if (block.type === "video") return "Video block";
+  if (block.type === "file") return "File block";
+  if (block.type === "pdf") return "PDF block";
+  if (block.type === "equation") return "Equation block";
+  if (block.type === "breadcrumb") return "Breadcrumb";
+  if (block.type === "table_of_contents") return "Table of Contents";
+  
+  return `[${block.type.replace(/_/g, " ")}]`;
 }
 
 export async function notionFetch<T>(

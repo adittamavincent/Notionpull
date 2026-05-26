@@ -27,9 +27,15 @@ type RowProps = {
   onToggle: (node: TreeNodeData, checked: boolean) => void;
   onConfigureDatabase?: (node: TreeNodeData) => void;
   style?: React.CSSProperties;
+  dragInfo?: {
+    isDragging: boolean;
+    checked: boolean;
+    startDragging: (checked: boolean) => void;
+    onDragOver: (node: TreeNodeData) => void;
+  };
 };
 
-function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, onConfigureDatabase, style }: RowProps) {
+function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, onConfigureDatabase, style, dragInfo }: RowProps) {
   const hasChildren = node.children && node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
   const isDatabase = node.kind === "database" || node.kind === "data_source";
@@ -47,6 +53,7 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
       case "database":
       case "data_source": return <Database className="h-4 w-4 text-blue-500" />;
       case "row": return <Rows3 className="h-4 w-4 text-emerald-500" />;
+      case "block": return <Rows3 className="h-4 w-4 text-zinc-400" />;
       default: return <FileText className="h-4 w-4 text-zinc-500" />;
     }
   };
@@ -55,6 +62,11 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
     <div
       className="group relative flex h-10 items-center gap-2 border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50"
       style={{ ...style, paddingLeft: `${8 + node.depth * 24}px` }}
+      onMouseEnter={() => {
+        if (dragInfo?.isDragging) {
+          dragInfo.onDragOver(node);
+        }
+      }}
     >
       <button
         className={`flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-200 ${hasChildren ? "text-zinc-500" : "invisible"}`}
@@ -69,6 +81,14 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
         className="h-4 w-4 rounded border-zinc-300 accent-zinc-900"
         checked={selectionState === "checked"}
         onChange={(event) => onToggle(node, event.target.checked)}
+        onMouseDown={(event) => {
+          if (event.button === 0) { // Left click
+            event.preventDefault(); 
+            const nextChecked = selectionState !== "checked";
+            dragInfo?.startDragging(nextChecked);
+            onToggle(node, nextChecked);
+          }
+        }}
         aria-label={`Select ${node.title}`}
         aria-checked={selectionState === "indeterminate" ? "mixed" : selectionState === "checked"}
       />
@@ -135,6 +155,27 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
 
 export function FinderTree({ nodes, selected, loading, onToggle, onConfigureDatabase }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [dragInfo, setDragInfo] = useState<{ isDragging: boolean; checked: boolean }>({
+    isDragging: false,
+    checked: false,
+  });
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      setDragInfo((prev) => (prev.isDragging ? { ...prev, isDragging: false } : prev));
+    };
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  const dragHandlers = useMemo(() => ({
+    isDragging: dragInfo.isDragging,
+    checked: dragInfo.checked,
+    startDragging: (checked: boolean) => setDragInfo({ isDragging: true, checked }),
+    onDragOver: (node: TreeNodeData) => {
+      onToggle(node, dragInfo.checked);
+    },
+  }), [dragInfo, onToggle]);
 
   const selectionStateById = useMemo(() => {
     const states = new Map<string, SelectionState>();
@@ -226,6 +267,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
             onToggleCollapse={toggleCollapse}
             onToggle={onToggle}
             onConfigureDatabase={onConfigureDatabase}
+            dragInfo={dragHandlers}
           />
         ))}
       </div>
@@ -246,6 +288,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
               onToggleCollapse={toggleCollapse}
               onToggle={onToggle}
               onConfigureDatabase={onConfigureDatabase}
+              dragInfo={dragHandlers}
               style={{
                 position: "absolute",
                 top: 0,

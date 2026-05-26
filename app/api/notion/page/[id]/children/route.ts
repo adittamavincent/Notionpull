@@ -16,13 +16,13 @@ export async function GET(request: Request, { params }: Params) {
     } while (start_cursor);
 
     return Response.json({
-      results: blocks
-        .filter((block) => block.type === "child_page" || block.type === "child_database")
-        .map((block) => ({
-          id: block.id,
-          type: block.type === "child_page" ? "page" : "database",
-          title: blockTitle(block)
-        }))
+      results: blocks.map((block) => ({
+        id: block.id,
+        type: block.type === "child_page" ? "page" : (block.type === "child_database" ? "database" : "block"),
+        kind: block.type,
+        title: blockTitle(block),
+        hasChildren: block.has_children
+      }))
     });
   } catch (error) {
     return notionErrorResponse(error);

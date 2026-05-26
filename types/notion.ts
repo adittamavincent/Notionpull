@@ -15,7 +15,7 @@ export type DetectedObject = {
   properties?: Record<string, any>;
 };
 
-export type TreeNodeKind = "page" | "database" | "data_source" | "row";
+export type TreeNodeKind = "page" | "database" | "data_source" | "row" | "block";
 
 export type TreeNodeData = {
   id: string;

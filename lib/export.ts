@@ -9,7 +9,7 @@ export type DatabaseExportItem = {
   selectedColumns?: string[];
   properties?: Record<string, any>;
 };
-export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[]; includeProperties?: boolean };
+export type PageExportItem = { kind: "page" | "row" | "block"; title: string; page?: NotionPage; blocks?: NotionBlock[]; includeProperties?: boolean };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
 export type ExportOptions = PropertyValueOptions;
@@ -127,6 +127,7 @@ function pageToXml(item: PageExportItem, options: ExportOptions): string {
   const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
   if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
   if (item.kind === "row") attributes.push(`kind="row"`);
+  if (item.kind === "block") attributes.push(`kind="block"`);
   const lines = [`<page ${attributes.join(" ")}>`];
 
   if (item.includeProperties !== false && item.page?.properties && Object.keys(item.page.properties).length > 0) {
