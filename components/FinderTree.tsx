@@ -80,10 +80,17 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
         type="checkbox"
         className="h-4 w-4 rounded border-zinc-300 accent-zinc-900"
         checked={selectionState === "checked"}
-        onChange={(event) => onToggle(node, event.target.checked)}
+        onClick={(event) => {
+          // Prevent browser from toggling checkbox state twice
+          event.stopPropagation();
+        }}
+        onChange={() => {
+          // No-op: we handle toggling manually via onMouseDown/onDragOver
+        }}
         onMouseDown={(event) => {
           if (event.button === 0) { // Left click
             const nextChecked = selectionState !== "checked";
+            onToggle(node, nextChecked); 
             dragInfo?.startDragging(node.id, nextChecked);
           }
         }}
@@ -170,12 +177,11 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
   const dragHandlers = useMemo(() => ({
     isDragging: dragInfo.isDragging,
     checked: dragInfo.checked,
-    startDragging: (id: string, checked: boolean) => setDragInfo({ isDragging: true, checked, startId: id }),
+    startDragging: (id: string, checked: boolean) => {
+      setDragInfo({ isDragging: true, checked, startId: id });
+    },
     onDragOver: (node: TreeNodeData) => {
-      // Only toggle if it's not the starting node to avoid double-toggle or interference
-      if (node.id !== dragInfo.startId) {
-        onToggle(node, dragInfo.checked);
-      }
+      onToggle(node, dragInfo.checked);
     },
   }), [dragInfo, onToggle]);
 
