@@ -270,7 +270,8 @@ export default function Page() {
             rows: exportRows, 
             columns: database.columns ?? node.columns,
             selectedColumns: node.selectedColumns,
-            properties: database.properties
+            properties: database.properties,
+            depth: node.depth
           });
         } else {
           let blocks: NotionBlock[] = [];
@@ -287,7 +288,7 @@ export default function Page() {
             // Skip rows that are already in a database table and have no content
             continue;
           }
-          items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable });
+          items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
         }
         
         current++;
