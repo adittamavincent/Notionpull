@@ -10,7 +10,7 @@ import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
-import { History, RefreshCw, LogOut } from "lucide-react";
+import { History, RefreshCw, LogOut, X } from "lucide-react";
 
 type DepthOption = "1" | "2" | "3" | "4" | "5" | "All";
 
@@ -348,12 +348,24 @@ export default function Page() {
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
               <label className="mb-2.5 block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
               <div className="flex gap-2">
-                <input
-                  className="min-w-0 flex-1 rounded-md border border-zinc-300 px-3.5 py-2 text-sm outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://www.notion.so/..."
-                />
+                <div className="relative flex-1">
+                  <input
+                    className="w-full rounded-md border border-zinc-300 pl-3.5 pr-10 py-2 text-sm outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                    value={url}
+                    onChange={(event) => setUrl(event.target.value)}
+                    placeholder="https://www.notion.so/..."
+                  />
+                  {url && (
+                    <button
+                      type="button"
+                      onClick={clearWork}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+                      title="Clear"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
                 <button 
                   className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]" 
                   disabled={loadingTree || !url.trim()}
