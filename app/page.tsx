@@ -47,6 +47,9 @@ export default function Page() {
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [titleMap, setTitleMap] = useState<Map<string, string>>(new Map());
 
+  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+  const [relativeTime, setRelativeTime] = useState("");
+
   // Caching
   const treeCache = useRef<Map<string, TreeNodeData>>(new Map());
   const pageChildrenCache = useRef<Map<string, Promise<PageChildrenResponse>>>(new Map());
@@ -78,6 +81,27 @@ export default function Page() {
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
   // Use unique set of top-level selected nodes to avoid duplicates when parent and child are both selected
   const selectedNodes = useMemo(() => flatNodes.filter((node) => selected.has(node.id) && (!node.parentId || !selected.has(node.parentId))), [flatNodes, selected]);
+
+  useEffect(() => {
+    if (!lastFetch) {
+      setRelativeTime("");
+      return;
+    }
+
+    const updateRelative = () => {
+      const now = new Date();
+      const diffInSeconds = Math.floor((now.getTime() - lastFetch.getTime()) / 1000);
+
+      if (diffInSeconds < 5) setRelativeTime("just now");
+      else if (diffInSeconds < 60) setRelativeTime(`${diffInSeconds}s ago`);
+      else if (diffInSeconds < 3600) setRelativeTime(`${Math.floor(diffInSeconds / 60)}m ago`);
+      else setRelativeTime(`${Math.floor(diffInSeconds / 3600)}h ago`);
+    };
+
+    updateRelative();
+    const timer = setInterval(updateRelative, 10000);
+    return () => clearInterval(timer);
+  }, [lastFetch]);
 
   function refreshTokens() {
     const nextTokens = getTokens();
@@ -171,6 +195,7 @@ export default function Page() {
       
       treeCache.current.set(cacheKey, root);
       setNodes([root]);
+      setLastFetch(new Date());
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -489,6 +514,11 @@ export default function Page() {
                   >
                     <RefreshCw className={`h-4 w-4 ${loadingTree ? 'animate-spin text-zinc-900' : ''}`} />
                   </button>
+                  {relativeTime && (
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                      Fetched {relativeTime}
+                    </span>
+                  )}
                 </div>
                 
                 <div className="flex gap-2">

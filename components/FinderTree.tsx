@@ -206,23 +206,33 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
       let total = 0;
       let selectedCount = 0;
 
-      for (const child of node.children ?? []) {
+      const children = node.children ?? [];
+      for (const child of children) {
         total += 1;
-        if (selected.has(child.id)) selectedCount += 1;
-
+        
         const childResult = visit(child);
+        // A child's internal state contributes to total
         total += childResult.total;
         selectedCount += childResult.selectedCount;
+
+        // The child's OWN selection state
+        if (selected.has(child.id)) selectedCount += 1;
       }
 
       if (total === 0) {
         states.set(node.id, selected.has(node.id) ? "checked" : "unchecked");
-      } else if (selectedCount === 0) {
-        states.set(node.id, selected.has(node.id) ? "checked" : "unchecked");
-      } else if (selectedCount === total) {
-        states.set(node.id, "checked");
       } else {
-        states.set(node.id, "indeterminate");
+        // If the node itself is selected, it's checked OR indeterminate based on children
+        // But the user usually wants the checkbox to reflect current selection state.
+        const isSelfSelected = selected.has(node.id);
+        
+        if (isSelfSelected && selectedCount === total) {
+          states.set(node.id, "checked");
+        } else if (selectedCount > 0 || isSelfSelected) {
+          states.set(node.id, "indeterminate");
+        } else {
+          states.set(node.id, "unchecked");
+        }
       }
 
       return { total, selectedCount };
