@@ -50,6 +50,7 @@ export default function Page() {
   // Caching
   const treeCache = useRef<Map<string, TreeNodeData>>(new Map());
   const pageChildrenCache = useRef<Map<string, Promise<PageChildrenResponse>>>(new Map());
+  const contentCache = useRef<Map<string, Promise<{ results: NotionBlock[] }>>>(new Map());
   const databaseCache = useRef<Map<string, Promise<DatabaseResponse>>>(new Map());
   const rowsCache = useRef<Map<string, Promise<NotionPage[]>>>(new Map());
   const titleCache = useRef<Map<string, string>>(new Map());
@@ -75,7 +76,8 @@ export default function Page() {
 
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
-  const selectedNodes = useMemo(() => flatNodes.filter((node) => selected.has(node.id)), [flatNodes, selected]);
+  // Use unique set of top-level selected nodes to avoid duplicates when parent and child are both selected
+  const selectedNodes = useMemo(() => flatNodes.filter((node) => selected.has(node.id) && (!node.parentId || !selected.has(node.parentId))), [flatNodes, selected]);
 
   function refreshTokens() {
     const nextTokens = getTokens();
@@ -126,6 +128,7 @@ export default function Page() {
     setError("");
     if (forceRefresh) {
       pageChildrenCache.current.clear();
+      contentCache.current.clear();
       databaseCache.current.clear();
       rowsCache.current.clear();
     }
@@ -272,12 +275,14 @@ export default function Page() {
           const estimatedBatches = Math.max(1, Math.ceil(estimatedRows / 100));
           const unitsPerBatch = Math.floor(UNITS_PER_NODE / (estimatedBatches + 1));
 
-          const allRows = await fetchAllRows(activeToken.token, database.dataSourceId, (count) => {
-              const batchesDone = Math.floor(count / 100);
-              const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
-              setExportCurrent(progress);
-              setExportStatus(`Loading ${node.title} (${count} rows)...`);
-          });
+          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}`, () => 
+            fetchAllRows(activeToken.token, database.dataSourceId, (count) => {
+                const batchesDone = Math.floor(count / 100);
+                const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
+                setExportCurrent(progress);
+                setExportStatus(`Loading ${node.title} (${count} rows)...`);
+            })
+          );
             
           let exportRows = allRows;
           
@@ -307,7 +312,19 @@ export default function Page() {
           let blocks: NotionBlock[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
-              blocks = (await apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content`)).results;
+              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}`, () => 
+                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content`)
+              );
+              blocks = body.results;
+
+              // Filter blocks based on selection if blocks are shown in tree
+              if (node.children && node.children.length > 0) {
+                const selectedInTree = new Set(node.children.filter(c => selected.has(c.id)).map(c => c.id));
+                // Only filter if some children are NOT selected (to avoid unexpected empty export if nothing selected in sub-tree)
+                if (selectedInTree.size < node.children.length) {
+                  blocks = blocks.filter(b => selectedInTree.has(b.id));
+                }
+              }
             } catch {
               blocks = [];
             }
@@ -445,6 +462,9 @@ export default function Page() {
             {detected && (
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 pr-1">
+                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
+                  </div>
                   <div className="flex rounded-md border border-zinc-300 bg-white p-1 shadow-sm">
                     {depthOptions.map((option) => (
                       <button
@@ -465,7 +485,7 @@ export default function Page() {
                   <button 
                     onClick={handleRefresh}
                     className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:bg-zinc-50"
-                    title="Refresh data"
+                    title="Refresh (Clear Cache)"
                   >
                     <RefreshCw className={`h-4 w-4 ${loadingTree ? 'animate-spin text-zinc-900' : ''}`} />
                   </button>

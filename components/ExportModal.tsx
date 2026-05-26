@@ -28,9 +28,9 @@ export function ExportModal({ open, items, titleById, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Close on any key except when a modifier is held (to allow Copy etc.)
-      if (e.ctrlKey || e.metaKey || e.altKey || ["Control", "Shift", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
-      onClose();
+      if (e.key === "Escape") {
+        onClose();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
