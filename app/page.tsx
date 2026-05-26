@@ -155,11 +155,11 @@ export default function Page() {
       contentCache.current.clear();
       databaseCache.current.clear();
       rowsCache.current.clear();
+      treeCache.current.clear(); // Clear tree structure cache on refresh
     }
     
     const cacheKey = treeCacheKey(object.id, currentDepth);
     
-    let cachedBase: TreeNodeData | null = null;
     if (!forceRefresh) {
       const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth);
       if (cached) {
@@ -168,7 +168,6 @@ export default function Page() {
         setLoadingTree(false);
         return;
       }
-      cachedBase = getNearestShallowCachedTree(treeCache.current, object.id, currentDepth);
     }
 
     // Clear selection if it's a completely new root (not just depth change)
@@ -178,7 +177,7 @@ export default function Page() {
     
     try {
       const maxDepth = currentDepth === "All" ? Infinity : Number(currentDepth);
-      const rootSeed: TreeNodeData = cachedBase ?? {
+      const rootSeed: TreeNodeData = {
         id: object.id,
         title: object.title,
         kind: object.type,
@@ -193,6 +192,27 @@ export default function Page() {
         rows: rowsCache.current
       });
       
+      // Reconcile selection: If a node was already selected, make sure its new children follow the selection
+      setSelected((prev) => {
+        const next = new Set(prev);
+        const seen = new Set<string>();
+        
+        const propagate = (n: TreeNodeData, parentSelected: boolean) => {
+          if (seen.has(n.id)) return;
+          seen.add(n.id);
+          
+          const isSelected = parentSelected || next.has(n.id);
+          if (isSelected) next.add(n.id);
+          
+          for (const child of n.children ?? []) {
+            propagate(child, isSelected);
+          }
+        };
+
+        propagate(root, next.has(root.id));
+        return next;
+      });
+
       treeCache.current.set(cacheKey, root);
       setNodes([root]);
       setLastFetch(new Date());
@@ -618,25 +638,6 @@ function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string,
   return null;
 }
 
-function getNearestShallowCachedTree(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption): TreeNodeData | null {
-  const requestedDepth = depthValue(depth);
-  let bestTree: TreeNodeData | null = null;
-  let bestDepth = -1;
-
-  for (const option of depthOptions) {
-    const optionDepth = depthValue(option);
-    if (optionDepth >= requestedDepth || optionDepth <= bestDepth) continue;
-
-    const tree = cache.get(treeCacheKey(rootId, option));
-    if (tree) {
-      bestTree = tree;
-      bestDepth = optionDepth;
-    }
-  }
-
-  return bestTree ? cloneTree(bestTree) : null;
-}
-
 function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
   if (node.depth >= maxDepth || !node.children?.length) {
     return { ...node, children: undefined };
@@ -645,13 +646,6 @@ function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
   return {
     ...node,
     children: node.children.map((child) => cloneTreeToDepth(child, maxDepth))
-  };
-}
-
-function cloneTree(node: TreeNodeData): TreeNodeData {
-  return {
-    ...node,
-    children: node.children?.map(cloneTree)
   };
 }
 
