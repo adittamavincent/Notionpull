@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Copy, Download, RotateCcw, X } from "lucide-react";
+import { Copy, Download, X } from "lucide-react";
 import { exportMarkdown, exportCsv, type ExportItem } from "@/lib/export";
 
 type Props = {
@@ -9,10 +9,9 @@ type Props = {
   items: ExportItem[];
   titleById: Map<string, string>;
   onClose: () => void;
-  onClear: () => void;
 };
 
-export function ExportModal({ open, items, titleById, onClose, onClear }: Props) {
+export function ExportModal({ open, items, titleById, onClose }: Props) {
   const [format, setFormat] = useState<"markdown" | "csv">("markdown");
   const [output, setOutput] = useState("");
 
@@ -25,6 +24,17 @@ export function ExportModal({ open, items, titleById, onClose, onClear }: Props)
       }
     }
   }, [open, items, titleById, format]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Close on any key except when a modifier is held (to allow Copy etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey || ["Control", "Shift", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
   if (!open) return null;
   const ext = format === "markdown" ? "md" : "csv";
@@ -44,8 +54,8 @@ export function ExportModal({ open, items, titleById, onClose, onClear }: Props)
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-white/50 backdrop-blur-md">
-      <div className="flex h-full flex-col bg-white shadow-2xl md:mx-auto md:my-10 md:h-auto md:max-h-[85vh] md:w-full md:max-w-5xl md:rounded-xl">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-white/50 backdrop-blur-md p-4 md:p-10" onClick={onClose}>
+      <div className="flex h-full w-full flex-col bg-white shadow-2xl md:max-h-[85vh] md:max-w-5xl rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-5 py-3 md:rounded-t-xl">
           <div className="flex items-center gap-4">
             <h2 className="text-sm font-semibold text-zinc-900">Export output</h2>
@@ -74,9 +84,6 @@ export function ExportModal({ open, items, titleById, onClose, onClear }: Props)
               <Download className="h-4 w-4" /> Download .{ext}
             </button>
             <div className="mx-2 h-5 w-px bg-zinc-300" />
-            <button className="flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800" onClick={onClear}>
-              <RotateCcw className="h-4 w-4" /> Clear & Start Over
-            </button>
             <button className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600" onClick={onClose}>
               <X className="h-5 w-5" />
             </button>

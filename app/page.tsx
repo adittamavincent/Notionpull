@@ -320,7 +320,7 @@ export default function Page() {
     <main className="min-h-screen pb-24 bg-zinc-50">
       <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
-          <div>
+          <div className="cursor-pointer select-none" onClick={clearWork} title="Start over">
             <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
             <p className="text-xs font-medium text-zinc-500">{activeToken?.workspaceName ?? "No active workspace"}</p>
           </div>
@@ -349,7 +349,7 @@ export default function Page() {
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
               <label className="mb-2.5 block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
               <div className="flex gap-2">
-                <div className="relative flex-1">
+                <div className="relative flex-1 group">
                   <input
                     className="w-full rounded-md border border-zinc-300 pl-3.5 pr-10 py-2 text-sm outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
                     value={url}
@@ -360,7 +360,7 @@ export default function Page() {
                     <button
                       type="button"
                       onClick={clearWork}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                       title="Clear"
                     >
                       <X className="h-4 w-4" />
@@ -501,7 +501,6 @@ export default function Page() {
         items={exportItems} 
         titleById={titleMap} 
         onClose={() => setExportItems([])} 
-        onClear={clearWork} 
       />
     </main>
   );
