@@ -30,7 +30,7 @@ type RowProps = {
   dragInfo?: {
     isDragging: boolean;
     checked: boolean;
-    startDragging: (checked: boolean) => void;
+    startDragging: (id: string, checked: boolean) => void;
     onDragOver: (node: TreeNodeData) => void;
   };
 };
@@ -83,10 +83,8 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
         onChange={(event) => onToggle(node, event.target.checked)}
         onMouseDown={(event) => {
           if (event.button === 0) { // Left click
-            event.preventDefault(); 
             const nextChecked = selectionState !== "checked";
-            dragInfo?.startDragging(nextChecked);
-            onToggle(node, nextChecked);
+            dragInfo?.startDragging(node.id, nextChecked);
           }
         }}
         aria-label={`Select ${node.title}`}
@@ -155,14 +153,15 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
 
 export function FinderTree({ nodes, selected, loading, onToggle, onConfigureDatabase }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [dragInfo, setDragInfo] = useState<{ isDragging: boolean; checked: boolean }>({
+  const [dragInfo, setDragInfo] = useState<{ isDragging: boolean; checked: boolean; startId: string | null }>({
     isDragging: false,
     checked: false,
+    startId: null,
   });
 
   useEffect(() => {
     const handleMouseUp = () => {
-      setDragInfo((prev) => (prev.isDragging ? { ...prev, isDragging: false } : prev));
+      setDragInfo((prev) => (prev.isDragging ? { ...prev, isDragging: false, startId: null } : prev));
     };
     window.addEventListener("mouseup", handleMouseUp);
     return () => window.removeEventListener("mouseup", handleMouseUp);
@@ -171,9 +170,12 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
   const dragHandlers = useMemo(() => ({
     isDragging: dragInfo.isDragging,
     checked: dragInfo.checked,
-    startDragging: (checked: boolean) => setDragInfo({ isDragging: true, checked }),
+    startDragging: (id: string, checked: boolean) => setDragInfo({ isDragging: true, checked, startId: id }),
     onDragOver: (node: TreeNodeData) => {
-      onToggle(node, dragInfo.checked);
+      // Only toggle if it's not the starting node to avoid double-toggle or interference
+      if (node.id !== dragInfo.startId) {
+        onToggle(node, dragInfo.checked);
+      }
     },
   }), [dragInfo, onToggle]);
 
