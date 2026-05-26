@@ -7,8 +7,17 @@ export async function GET(request: Request) {
     const id = new URL(request.url).searchParams.get("id");
     if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
-    try {
-      const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
+    // Run probes in parallel for faster "detection"
+    const results = await Promise.allSettled([
+      notionFetch<NotionDatabase>(token, `/databases/${id}`),
+      notionFetch<any>(token, `/data_sources/${id}`),
+      notionFetch<NotionPage>(token, `/pages/${id}`)
+    ]);
+
+    const [dbRes, dsRes, pageRes] = results;
+
+    if (dbRes.status === "fulfilled") {
+      const database = dbRes.value;
       return Response.json({
         type: "database",
         id: database.id,
@@ -17,26 +26,30 @@ export async function GET(request: Request) {
         columns: Object.keys(database.properties ?? {}),
         properties: database.properties ?? {}
       });
-    } catch (error) {
-      if (!isProbeMiss(error)) throw error;
     }
 
-    try {
-      const dataSource: any = await notionFetch(token, `/data_sources/${id}`);
-      return Response.json({
-        type: "data_source",
-        id: dataSource.id,
-        title: dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source",
-        dataSourceId: dataSource.id,
-        columns: Object.keys(dataSource.properties ?? {}),
-        properties: dataSource.properties ?? {}
-      });
-    } catch (error) {
-      if (!isProbeMiss(error)) throw error;
+    if (dsRes.status === "fulfilled") {
+        const dataSource = dsRes.value;
+        return Response.json({
+          type: "data_source",
+          id: dataSource.id,
+          title: dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source",
+          dataSourceId: dataSource.id,
+          columns: Object.keys(dataSource.properties ?? {}),
+          properties: dataSource.properties ?? {}
+        });
     }
 
-    const page = await notionFetch<NotionPage>(token, `/pages/${id}`);
-    return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
+    if (pageRes.status === "fulfilled") {
+        const page = pageRes.value;
+        return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
+    }
+
+    // If all failed, throw the first "real" error or the last error
+    const firstError = [dbRes, dsRes, pageRes].find(r => r.status === "rejected" && !isProbeMiss((r as PromiseRejectedResult).reason));
+    if (firstError) throw (firstError as PromiseRejectedResult).reason;
+
+    throw new Error("Object not found or no access");
   } catch (error) {
     return notionErrorResponse(error);
   }

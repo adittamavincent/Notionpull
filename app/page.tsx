@@ -41,6 +41,7 @@ export default function Page() {
   const [exporting, setExporting] = useState(false);
   const [exportTotal, setExportTotal] = useState(0);
   const [exportCurrent, setExportCurrent] = useState(0);
+  const [exportStatus, setExportStatus] = useState("");
   
   // Export Modal State
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
@@ -97,18 +98,22 @@ export default function Page() {
     try {
       const ids = extractNotionIds(url);
       if (!ids.length) throw new Error("Could not find a valid Notion ID in that URL.");
-      let lastError: unknown;
-      for (const id of ids) {
-        try {
-          const object = await apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}`);
-          setDetected(object);
-          await loadTree(object, depth);
-          return;
-        } catch (err) {
-          lastError = err;
-        }
+      
+      // Try all IDs in parallel for faster detection
+      const results = await Promise.allSettled(
+        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}`))
+      );
+      
+      const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
+      
+      if (successful) {
+        setDetected(successful.value);
+        await loadTree(successful.value, depth);
+      } else {
+        // Find the most relevant error
+        const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+        throw firstError?.reason || new Error("Could not detect any Notion object in this URL.");
       }
-      throw lastError;
     } catch (err) {
       setError(errorMessage(err));
       setLoadingTree(false);
@@ -237,17 +242,22 @@ export default function Page() {
     setExporting(true);
     setError("");
     
-    setExportTotal(selectedNodes.length);
+    // Use a granular scale where each selected node is 100 units
+    const UNITS_PER_NODE = 100;
+    setExportTotal(selectedNodes.length * UNITS_PER_NODE);
     setExportCurrent(0);
+    setExportStatus("Initializing...");
     
     try {
       const items: ExportItem[] = [];
-      let current = 0;
+      let baseProgress = 0;
       
       for (const node of selectedNodes) {
+        setExportStatus(`Fetching ${node.title}...`);
+        
         if (node.error) {
-          current++;
-          setExportCurrent(current);
+          baseProgress += UNITS_PER_NODE;
+          setExportCurrent(baseProgress);
           continue;
         }
         
@@ -255,13 +265,30 @@ export default function Page() {
           const database = node.dataSourceId && node.columns
             ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties }
             : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${node.id}`);
-          const allRows = node.children?.length ? await fetchAllRows(activeToken.token, database.dataSourceId) : [];
+          
+          // Estimate number of batches to give granular progress
+          // Notion usually fetches in batches of 100
+          const estimatedRows = node.children?.length && node.children.length > 0 ? node.children.length : 200;
+          const estimatedBatches = Math.max(1, Math.ceil(estimatedRows / 100));
+          const unitsPerBatch = Math.floor(UNITS_PER_NODE / (estimatedBatches + 1));
+
+          const allRows = await fetchAllRows(activeToken.token, database.dataSourceId, (count) => {
+              const batchesDone = Math.floor(count / 100);
+              const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
+              setExportCurrent(progress);
+              setExportStatus(`Loading ${node.title} (${count} rows)...`);
+          });
+            
           let exportRows = allRows;
           
           // If rows are loaded in the tree (depth >= 2), filter by what's checked
           if (node.children && node.children.length > 0) {
             const selectedRowIds = new Set(node.children.filter(c => selected.has(c.id)).map(c => c.id));
-            exportRows = allRows.filter(row => selectedRowIds.has(row.id));
+            // Only filter if some children of the database are NOT selected
+            // (If all are selected, exportRows = allRows is fine)
+            if (selectedRowIds.size < node.children.length) {
+                exportRows = allRows.filter(row => selectedRowIds.has(row.id));
+            }
           }
           
           items.push({ 
@@ -274,6 +301,9 @@ export default function Page() {
             depth: node.depth
           });
         } else {
+          // Page/Row/Block fetching
+          // No hard jump to 50%, let the smooth UI logic handle the perceived progress
+          
           let blocks: NotionBlock[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
@@ -285,25 +315,31 @@ export default function Page() {
           
           const rowAlreadyInSelectedTable = node.kind === "row" && node.parentId && selected.has(node.parentId);
           if (rowAlreadyInSelectedTable && !blocks.length) {
-            // Skip rows that are already in a database table and have no content
-            continue;
+             // Skip
+          } else {
+            items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
           }
-          items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
         }
         
-        current++;
-        setExportCurrent(current);
+        baseProgress += UNITS_PER_NODE;
+        setExportCurrent(baseProgress);
       }
       
+      setExportStatus("Generating export mapping...");
       const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current);
       
+      setExportStatus("Ready!");
       setTitleMap(titleById);
       setExportItems(items);
+      
+      // Ensure we hit the 100% mark in state before closing
+      setExportCurrent(selectedNodes.length * UNITS_PER_NODE);
       
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setTimeout(() => setExporting(false), 500); // Small delay so user sees 100% completion
+      // Keep open just long enough for the satisfaction animation to complete
+      setTimeout(() => setExporting(false), 800); 
     }
   }
 
@@ -494,6 +530,7 @@ export default function Page() {
         open={exporting} 
         total={exportTotal} 
         current={exportCurrent} 
+        status={exportStatus}
       />
 
       <ExportModal 
@@ -660,7 +697,7 @@ function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () =
   return request;
 }
 
-async function fetchAllRows(token: string, dataSourceId: string): Promise<NotionPage[]> {
+async function fetchAllRows(token: string, dataSourceId: string, onProgress?: (count: number) => void): Promise<NotionPage[]> {
   const rows: NotionPage[] = [];
   let cursor: string | null = null;
   do {
@@ -668,6 +705,7 @@ async function fetchAllRows(token: string, dataSourceId: string): Promise<Notion
     const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows${qs}`);
     rows.push(...body.results);
     cursor = body.has_more ? body.next_cursor : null;
+    if (onProgress) onProgress(rows.length);
   } while (cursor);
   return rows;
 }
