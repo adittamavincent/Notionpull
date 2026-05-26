@@ -14,7 +14,8 @@ export async function GET(request: Request, { params }: Params) {
       id: database.id,
       title: databaseTitle(database),
       dataSourceId,
-      columns: Object.keys(dataSource.properties ?? database.properties ?? {})
+      columns: Object.keys(dataSource.properties ?? database.properties ?? {}),
+      properties: dataSource.properties ?? database.properties ?? {}
     });
   } catch (error) {
     return notionErrorResponse(error);

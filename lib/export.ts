@@ -1,7 +1,14 @@
 import type { NotionBlock, NotionPage } from "@/types/notion";
 import { propertyValue, type PropertyValueOptions } from "@/lib/notion";
 
-export type DatabaseExportItem = { kind: "database" | "data_source"; title: string; rows: NotionPage[]; columns?: string[]; selectedColumns?: string[] };
+export type DatabaseExportItem = { 
+  kind: "database" | "data_source"; 
+  title: string; 
+  rows: NotionPage[]; 
+  columns?: string[]; 
+  selectedColumns?: string[];
+  properties?: Record<string, any>;
+};
 export type PageExportItem = { kind: "page" | "row"; title: string; page?: NotionPage; blocks?: NotionBlock[]; includeProperties?: boolean };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
@@ -32,6 +39,35 @@ function isDatabaseItem(item: ExportItem): item is DatabaseExportItem {
 function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): string {
   const columns = databaseColumns(item);
   const head = [`## ${item.title}`];
+
+  // Add column metadata (options/descriptions) for select/multi_select/status
+  const metadataLines: string[] = [];
+  if (item.properties) {
+    for (const column of columns) {
+      const prop = item.properties[column];
+      if (!prop) continue;
+
+      let columnInfo = "";
+      if (prop.type === "select" && prop.select?.options?.length > 0) {
+        columnInfo = `Options: ${prop.select.options.map((o: any) => o.name).join(", ")}`;
+      } else if (prop.type === "multi_select" && prop.multi_select?.options?.length > 0) {
+        columnInfo = `Options: ${prop.multi_select.options.map((o: any) => o.name).join(", ")}`;
+      } else if (prop.type === "status" && prop.status?.options?.length > 0) {
+        columnInfo = `Options: ${prop.status.options.map((o: any) => o.name).join(", ")}`;
+      }
+
+      if (columnInfo) {
+        metadataLines.push(`- **${column}** (${prop.type}): ${columnInfo}${prop.description ? ` — ${prop.description}` : ""}`);
+      }
+    }
+  }
+
+  if (metadataLines.length > 0) {
+    head.push("\n### Column Information");
+    head.push(...metadataLines);
+    head.push("");
+  }
+
   if (!columns.length) return `${head[0]}\n\n_No columns._`;
   head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
   head.push(`| ${columns.map(() => "---").join(" | ")} |`);
@@ -43,7 +79,31 @@ function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): s
 
 function databaseToCsv(item: DatabaseExportItem, options: ExportOptions): string {
   const columns = databaseColumns(item);
-  const lines = [`# ${item.title}`, csvRow(columns)];
+  const lines = [`# ${item.title}`];
+
+  // Add metadata as comments or header lines in CSV if needed?
+  // For CSV, it's cleaner to keep it in the header comments or a separate section.
+  if (item.properties) {
+    for (const column of columns) {
+      const prop = item.properties[column];
+      if (!prop) continue;
+
+      let columnInfo = "";
+      if (prop.type === "select" && prop.select?.options?.length > 0) {
+        columnInfo = `Options: ${prop.select.options.map((o: any) => o.name).join(", ")}`;
+      } else if (prop.type === "multi_select" && prop.multi_select?.options?.length > 0) {
+        columnInfo = `Options: ${prop.multi_select.options.map((o: any) => o.name).join(", ")}`;
+      } else if (prop.type === "status" && prop.status?.options?.length > 0) {
+        columnInfo = `Options: ${prop.status.options.map((o: any) => o.name).join(", ")}`;
+      }
+
+      if (columnInfo) {
+        lines.push(`# Column: ${column} (${prop.type}) - ${columnInfo}${prop.description ? ` - ${prop.description}` : ""}`);
+      }
+    }
+  }
+
+  lines.push(csvRow(columns));
   for (const row of item.rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
   return lines.join("\n");
 }

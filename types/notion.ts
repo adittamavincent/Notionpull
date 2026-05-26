@@ -12,6 +12,7 @@ export type DetectedObject = {
   title: string;
   dataSourceId?: string;
   columns?: string[];
+  properties?: Record<string, any>;
 };
 
 export type TreeNodeKind = "page" | "database" | "data_source" | "row";
@@ -28,6 +29,7 @@ export type TreeNodeData = {
   error?: string;
   columns?: string[];
   selectedColumns?: string[];
+  properties?: Record<string, any>;
 };
 
 export type NotionRichText = {

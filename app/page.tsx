@@ -152,7 +152,8 @@ export default function Page() {
         kind: object.type,
         depth: 0,
         dataSourceId: object.dataSourceId,
-        columns: object.columns
+        columns: object.columns,
+        properties: object.properties
       };
       const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
         pageChildren: pageChildrenCache.current,
@@ -252,8 +253,8 @@ export default function Page() {
         
         if (node.kind === "database" || node.kind === "data_source") {
           const database = node.dataSourceId && node.columns
-            ? { dataSourceId: node.dataSourceId, columns: node.columns }
-            : await apiFetch<{ dataSourceId: string; columns?: string[] }>(activeToken.token, `/api/notion/database/${node.id}`);
+            ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties }
+            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${node.id}`);
           const allRows = node.children?.length ? await fetchAllRows(activeToken.token, database.dataSourceId) : [];
           let exportRows = allRows;
           
@@ -268,7 +269,8 @@ export default function Page() {
             title: node.title, 
             rows: exportRows, 
             columns: database.columns ?? node.columns,
-            selectedColumns: node.selectedColumns 
+            selectedColumns: node.selectedColumns,
+            properties: database.properties
           });
         } else {
           let blocks: NotionBlock[] = [];
@@ -555,7 +557,7 @@ function cloneTree(node: TreeNodeData): TreeNodeData {
 }
 
 type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database"; title: string }> };
-type DatabaseResponse = { dataSourceId: string; title: string; columns?: string[] };
+type DatabaseResponse = { dataSourceId: string; title: string; columns?: string[]; properties?: Record<string, any> };
 type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
   databases: Map<string, Promise<DatabaseResponse>>;
@@ -583,6 +585,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
         const database = await memoDatabase(token, node.id, memo);
         node.dataSourceId = database.dataSourceId;
         node.columns = database.columns ?? node.columns;
+        node.properties = database.properties ?? node.properties;
       }
       if (node.depth + 1 > maxDepth) return node;
       if (!node.children) {
