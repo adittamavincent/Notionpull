@@ -27,3 +27,4 @@ Open `http://localhost:3000`.
 - Browser never calls `api.notion.com`; all Notion calls use `/api/notion/*` route handlers.
 - Notion API version is `2026-03-11`.
 - Database rows use `POST /v1/data_sources/{id}/query`.
+- Notion ID parser extracts both 32-character compact IDs and 36-character standard UUIDs from any shared URL, preserving hyphen boundaries and safely ignoring preceding slugs.

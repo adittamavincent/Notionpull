@@ -19,13 +19,22 @@ export function formatNotionId(input: string): string {
 }
 
 export function extractNotionIds(input: string): string[] {
-  const compact = input.replace(/-/g, "");
-  const matches = compact.match(/[0-9a-fA-F]{32}/g) ?? [];
-  return Array.from(new Set(matches.map(formatCompactNotionId)));
+  if (!input) return [];
+
+  // 1. Look for standard UUIDs (8-4-4-4-12)
+  const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+  const uuids = input.match(uuidRegex) ?? [];
+
+  // 2. Look for compact IDs (32 hex characters)
+  const compactRegex = /[0-9a-fA-F]{32}/g;
+  const compacts = input.match(compactRegex) ?? [];
+
+  const allMatches = [...uuids, ...compacts];
+  return Array.from(new Set(allMatches.map(formatCompactNotionId)));
 }
 
 function formatCompactNotionId(compactId: string): string {
-  const id = compactId.toLowerCase();
+  const id = compactId.replace(/-/g, "").toLowerCase();
   return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 }
 
