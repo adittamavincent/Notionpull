@@ -343,6 +343,7 @@ export default function Page() {
           
           items.push({ 
             kind: node.kind, 
+            id: node.id,
             title: node.title, 
             rows: exportRows, 
             columns: database.columns ?? node.columns,
@@ -370,6 +371,7 @@ export default function Page() {
                   
                   items.push({
                     kind: "database",
+                    id: block.id,
                     title: block.child_database?.title ?? "Untitled database",
                     rows: dbRows,
                     columns: dbMetadata.columns,

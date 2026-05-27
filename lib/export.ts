@@ -9,6 +9,7 @@ export type DatabaseExportItem = {
   selectedColumns?: string[];
   properties?: Record<string, any>;
   depth?: number;
+  id?: string;
 };
 export type PageExportItem = { 
   kind: "page" | "row" | "block"; 
@@ -23,12 +24,32 @@ export type ExportItem = DatabaseExportItem | PageExportItem;
 export type ExportOptions = PropertyValueOptions;
 
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
-  return items.map((item) => {
-    if (isDatabaseItem(item)) {
-      return databaseToMarkdown(item, options);
+  const dbById = new Map<string, DatabaseExportItem>();
+  for (const item of items) {
+    if (isDatabaseItem(item) && item.id) {
+      dbById.set(item.id, item);
     }
-    return pageToXml(item, options);
-  }).join("\n\n---\n\n");
+  }
+
+  const renderedDbIds = new Set<string>();
+
+  // Process pages first to allow databases to be embedded
+  const pageItems = items.filter(item => !isDatabaseItem(item));
+  const databaseItems = items.filter(item => isDatabaseItem(item));
+
+  const pageOutputs = pageItems.map((item) => {
+    return pageToXml(item as PageExportItem, options, dbById, renderedDbIds);
+  });
+
+  // Then process any remaining databases that weren't embedded in pages
+  const dbOutputs = databaseItems.map((item) => {
+    const dbItem = item as DatabaseExportItem;
+    if (dbItem.id && renderedDbIds.has(dbItem.id)) return null;
+    if (dbItem.id) renderedDbIds.add(dbItem.id);
+    return databaseToMarkdown(dbItem, options);
+  }).filter(Boolean);
+
+  return [...pageOutputs, ...dbOutputs].join("\n\n---\n\n");
 }
 
 export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
@@ -135,7 +156,7 @@ function databaseColumns(item: DatabaseExportItem): string[] {
   return [...seen];
 }
 
-function pageToXml(item: PageExportItem, options: ExportOptions): string {
+function pageToXml(item: PageExportItem, options: ExportOptions, dbById?: Map<string, DatabaseExportItem>, renderedDbIds?: Set<string>): string {
   const id = item.page?.id;
   const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
   if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
@@ -152,7 +173,7 @@ function pageToXml(item: PageExportItem, options: ExportOptions): string {
     lines.push(indent("</properties>"));
   }
 
-  const blocks = item.blocks?.map(blockToXml).filter(Boolean) ?? [];
+  const blocks = item.blocks?.map((b) => blockToXml(b, dbById, renderedDbIds, options)).filter(Boolean) ?? [];
   if (blocks.length > 0) {
     lines.push(indent("<content>"));
     for (const block of blocks) lines.push(indent(block, 2));
@@ -163,13 +184,14 @@ function pageToXml(item: PageExportItem, options: ExportOptions): string {
   return lines.join("\n");
 }
 
-function blockToXml(block: NotionBlock): string {
-  const data: any = block[block.type];
+function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>, renderedDbIds?: Set<string>, options?: ExportOptions): string {
+  const b = block as any;
+  const data: any = b[b.type];
   const text = richTextToPlainText(data?.rich_text);
-  const children = block.children?.map(blockToXml).filter(Boolean) ?? [];
+  const children = b.children?.map((child: any) => blockToXml(child, dbById, renderedDbIds, options)).filter(Boolean) ?? [];
   let tag = "";
   let attributes = "";
-  switch (block.type) {
+  switch (b.type) {
     case "paragraph":
       tag = "paragraph";
       break;
@@ -209,9 +231,19 @@ function blockToXml(block: NotionBlock): string {
       tag = "callout";
       break;
     case "child_database":
-      return `<database id="${escapeXmlAttribute(block.id)}" title="${escapeXmlAttribute(block.child_database?.title ?? "Untitled database")}" />`;
+      if (dbById && renderedDbIds && options) {
+        const dbId = b.id;
+        const dbItem = dbById.get(dbId);
+        if (dbItem) {
+          renderedDbIds.add(dbId);
+          const xml = `<database id="${escapeXmlAttribute(dbId)}" title="${escapeXmlAttribute(dbItem.title)}" />`;
+          const content = databaseToMarkdown(dbItem, options);
+          return `${content}\n\n${xml}`;
+        }
+      }
+      return `<database id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_database?.title ?? "Untitled database")}" />`;
     case "child_page":
-      return `<page id="${escapeXmlAttribute(block.id)}" title="${escapeXmlAttribute(block.child_page?.title ?? "Untitled page")}" />`;
+      return `<page id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_page?.title ?? "Untitled page")}" />`;
     default:
       return "";
   }
