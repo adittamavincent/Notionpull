@@ -16,13 +16,19 @@ type DepthOption = "1" | "2" | "3" | "4" | "5" | "All";
 
 const depthOptions: DepthOption[] = ["1", "2", "3", "4", "5", "All"];
 
+export interface HistoryItem {
+  url: string;
+  title: string;
+  type: string;
+}
+
 export default function Page() {
   const [tokens, setTokens] = useState<NotionTokenEntry[]>([]);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   
   const [url, setUrl] = useState("");
-  const [urlHistory, setUrlHistory] = useState<string[]>([]);
+  const [urlHistory, setUrlHistory] = useState<HistoryItem[]>([]);
   
   const [detected, setDetected] = useState<DetectedObject | null>(null);
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
@@ -63,16 +69,27 @@ export default function Page() {
   // Load URL History from LocalStorage
   useEffect(() => {
     try {
-      const history = JSON.parse(localStorage.getItem("notionpull_history") || "[]");
+      const history = JSON.parse(localStorage.getItem("notionpull_history_v2") || "[]");
       setUrlHistory(history);
     } catch {}
   }, []);
 
-  const saveUrlHistory = (newUrl: string) => {
+  const saveUrlHistory = (newUrl: string, title?: string, type?: string) => {
     try {
-      const hist = JSON.parse(localStorage.getItem("notionpull_history") || "[]");
-      const updated = [newUrl, ...hist.filter((u: string) => u !== newUrl)].slice(0, 5);
-      localStorage.setItem("notionpull_history", JSON.stringify(updated));
+      if (!title || !type) return;
+      const hist = JSON.parse(localStorage.getItem("notionpull_history_v2") || "[]");
+      const newItem: HistoryItem = { url: newUrl, title, type };
+      const updated = [newItem, ...hist.filter((h: HistoryItem) => h.url !== newUrl)].slice(0, 10);
+      localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
+      setUrlHistory(updated);
+    } catch {}
+  };
+
+  const removeUrlHistory = (index: number) => {
+    try {
+      const updated = [...urlHistory];
+      updated.splice(index, 1);
+      localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
       setUrlHistory(updated);
     } catch {}
   };
@@ -119,8 +136,6 @@ export default function Page() {
     setNodes([]);
     setSelected(new Set());
     
-    saveUrlHistory(url.trim());
-    
     try {
       const ids = extractNotionIds(url);
       if (!ids.length) throw new Error("Could not find a valid Notion ID in that URL.");
@@ -134,6 +149,7 @@ export default function Page() {
       
       if (successful) {
         setDetected(successful.value);
+        saveUrlHistory(url.trim(), successful.value.title, successful.value.type);
         await loadTree(successful.value, depth);
       } else {
         // Find the most relevant error
@@ -503,16 +519,28 @@ export default function Page() {
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <History className="h-4 w-4 text-zinc-400" />
                   <span className="text-xs text-zinc-500">Recent:</span>
-                  {urlHistory.map((hUrl, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setUrl(hUrl)}
-                      className="max-w-[200px] truncate rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-100"
-                      title={hUrl}
-                    >
-                      {hUrl}
-                    </button>
+                  {urlHistory.map((item, i) => (
+                    <div key={i} className="group relative flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setUrl(item.url)}
+                        className="flex items-center gap-1.5 rounded-l border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50"
+                        title={item.url}
+                      >
+                        <span className="font-bold text-zinc-400 uppercase text-[10px]">
+                          {item.type === 'page' ? 'P' : item.type === 'database' || item.type === 'data_source' ? 'D' : '?'}
+                        </span>
+                        <span className="max-w-[150px] truncate">{item.title || item.url}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeUrlHistory(i)}
+                        className="flex items-center justify-center rounded-r border-y border-r border-zinc-200 bg-white px-1.5 py-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-500 hover:border-red-200"
+                        title="Remove from history"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
