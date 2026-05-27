@@ -52,7 +52,7 @@ export function ExportModal({ open, items, titleById, onClose }: Props) {
       <div className="flex h-full w-full flex-col bg-white shadow-2xl md:max-h-[85vh] md:max-w-5xl rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-5 py-3 md:rounded-t-xl">
           <div className="flex items-center gap-4">
-            <h2 className="text-sm font-semibold text-zinc-900">Export output</h2>
+            <h2 className="text-sm font-semibold text-zinc-900">Export</h2>
           </div>
 
           <div className="flex items-center gap-2">
@@ -60,7 +60,7 @@ export function ExportModal({ open, items, titleById, onClose }: Props) {
               <Copy className="h-4 w-4" /> Copy
             </button>
             <button className="flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={download}>
-              <Download className="h-4 w-4" /> Download .md
+              <Download className="h-4 w-4" /> Download
             </button>
             <div className="mx-2 h-5 w-px bg-zinc-300" />
             <button className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600" onClick={onClose}>

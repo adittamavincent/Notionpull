@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Notionpull",
-  description: "Fetch Notion pages and data sources, then export Markdown or CSV."
+  description: "Fetch Notion pages and data sources, then export.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

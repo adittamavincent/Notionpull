@@ -1,6 +1,6 @@
 # Notionpull
 
-Next.js 14 App Router app for fetching shared Notion pages, databases, and data sources, then exporting selected content as Markdown or CSV.
+Next.js 14 App Router app for fetching shared Notion pages, databases, and data sources, then exporting selected content.
 
 ## Features
 
@@ -8,7 +8,6 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 - **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview.
 - **Smart Caching:** Local memory caching ensures that returning to a previously fetched depth level is instant. 
 - **Recent URLs:** Quick access to recently fetched Notion URLs.
-- **Instant Format Toggling:** Toggle between Markdown and CSV exports instantly without needing to refetch data.
 - **Export Progress:** Visual "building block" animation while fetching export data.
 
 ## Run

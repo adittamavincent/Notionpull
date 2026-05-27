@@ -626,7 +626,7 @@ export default function Page() {
                   <span>Preparing...</span>
                 </>
               ) : (
-                "Export Data"
+                "Export"
               )}
             </button>
           </div>
