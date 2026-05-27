@@ -52,15 +52,6 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
   return [...pageOutputs, ...dbOutputs].join("\n\n---\n\n");
 }
 
-export function exportCsv(items: ExportItem[], options: ExportOptions = {}): string {
-  return items.map((item) => {
-    if (isDatabaseItem(item)) {
-      return databaseToCsv(item, options);
-    }
-    return pageToXml(item, options);
-  }).join("\n\n# ---\n\n");
-}
-
 function isDatabaseItem(item: ExportItem): item is DatabaseExportItem {
   return item.kind === "database" || item.kind === "data_source";
 }
@@ -79,39 +70,20 @@ function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): s
 
   const metadataLines = getMetadataLines(item);
   if (metadataLines.length > 0) {
-    head.push(`\n${hSub} Column Information`);
-    head.push(...metadataLines);
     head.push("");
+    head.push(`${hSub} Column Information`);
+    head.push(...metadataLines);
   }
 
-  if (!columns.length) return `${head[0]}\n\n_No columns._`;
+  if (!columns.length) return head.join("\n") + "\n\n_No columns._";
+  
+  head.push("");
   head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
   head.push(`| ${columns.map(() => "---").join(" | ")} |`);
   for (const row of item.rows) {
     head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
   }
   return head.join("\n");
-}
-
-function databaseToCsv(item: DatabaseExportItem, options: ExportOptions): string {
-  const columns = databaseColumns(item);
-  const hLevel = getHeadingLevel(item.depth);
-  const hMain = "#".repeat(hLevel);
-  const hSub = "#".repeat(hLevel + 1);
-
-  const lines = [`# ${hMain} ${item.title}`];
-
-  const metadataLines = getMetadataLines(item);
-  if (metadataLines.length > 0) {
-    lines.push(`#`);
-    lines.push(`# ${hSub} Column Information`);
-    for (const meta of metadataLines) lines.push(`# ${meta}`);
-    lines.push(`#`);
-  }
-
-  lines.push(csvRow(columns));
-  for (const row of item.rows) lines.push(csvRow(columns.map((column) => propertyValue(row.properties?.[column], options))));
-  return lines.join("\n");
 }
 
 function getMetadataLines(item: DatabaseExportItem): string[] {
@@ -263,10 +235,6 @@ function richTextToPlainText(richText: any[] = []): string {
   return richText.map((part) => {
     return part.plain_text ?? "";
   }).join("").trim();
-}
-
-function csvRow(values: string[]): string {
-  return values.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",");
 }
 
 function escapeMarkdown(value: string): string {
