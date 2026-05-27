@@ -110,9 +110,9 @@ function getMetadataLines(item: DatabaseExportItem): string[] {
         columnInfo = `Options: ${prop.status.options.map((o: any) => o.name).join(", ")}`;
       }
 
-      if (columnInfo) {
-        metadataLines.push(`- **${column}** (${prop.type}): ${columnInfo}${prop.description ? ` — ${prop.description}` : ""}`);
-      }
+      const infoPart = columnInfo ? `: ${columnInfo}` : "";
+      const descPart = prop.description ? ` — ${prop.description}` : "";
+      metadataLines.push(`- **${column}** (${prop.type})${infoPart}${descPart}`);
     }
   }
   return metadataLines;
@@ -124,6 +124,9 @@ function databaseColumns(item: DatabaseExportItem): string[] {
   }
   if (item.columns && item.columns.length > 0) {
     return item.columns;
+  }
+  if (item.properties && Object.keys(item.properties).length > 0) {
+    return Object.keys(item.properties);
   }
   const seen = new Set<string>();
   for (const row of item.rows) {
