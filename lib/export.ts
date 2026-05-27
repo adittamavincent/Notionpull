@@ -208,6 +208,10 @@ function blockToXml(block: NotionBlock): string {
     case "callout":
       tag = "callout";
       break;
+    case "child_database":
+      return `<database id="${escapeXmlAttribute(block.id)}" title="${escapeXmlAttribute(block.child_database?.title ?? "Untitled database")}" />`;
+    case "child_page":
+      return `<page id="${escapeXmlAttribute(block.id)}" title="${escapeXmlAttribute(block.child_page?.title ?? "Untitled page")}" />`;
     default:
       return "";
   }

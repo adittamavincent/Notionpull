@@ -362,6 +362,23 @@ export default function Page() {
               );
               blocks = body.results;
 
+              // If blocks contain child_database, fetch their content too for proper nesting
+              for (const block of blocks as any[]) {
+                if (block.type === "child_database") {
+                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${block.id}`);
+                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId));
+                  
+                  items.push({
+                    kind: "database",
+                    title: block.child_database?.title ?? "Untitled database",
+                    rows: dbRows,
+                    columns: dbMetadata.columns,
+                    properties: dbMetadata.properties,
+                    depth: (node.depth ?? 0) + 1
+                  });
+                }
+              }
+
               // Filter blocks based on selection if blocks are shown in tree
               if (node.children && node.children.length > 0) {
                 const selectedInTree = new Set(node.children.filter(c => selected.has(c.id)).map(c => c.id));
