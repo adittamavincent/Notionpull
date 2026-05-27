@@ -310,7 +310,7 @@ export default function Page() {
         }
         
         if (node.kind === "database" || node.kind === "data_source") {
-          const database = node.dataSourceId && node.columns
+          const database = node.dataSourceId && node.columns && node.properties
             ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties }
             : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${node.id}`);
           
@@ -673,27 +673,29 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       }
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
-    if (node.kind === "database") {
-      if (!node.dataSourceId || !node.columns) {
-        const database = await memoDatabase(token, node.id, memo);
-        node.dataSourceId = database.dataSourceId;
-        node.columns = database.columns ?? node.columns;
-        node.properties = database.properties ?? node.properties;
+    if (node.kind === "database" || node.kind === "data_source") {
+      if (!node.dataSourceId || !node.columns || !node.properties) {
+        try {
+          // Both databases and data sources can be fetched via the database endpoint for metadata
+          // or we can use our unified database route which handles retrieval.
+          const metadata = await memoDatabase(token, node.id, memo);
+          node.dataSourceId = metadata.dataSourceId;
+          node.columns = metadata.columns ?? node.columns;
+          node.properties = metadata.properties ?? node.properties;
+        } catch {
+          // Fallback: If it's a data_source and database fetch fails, ensure we have at least an empty props object
+          if (!node.properties) node.properties = {};
+        }
       }
+      
       if (node.depth + 1 > maxDepth) return node;
-      if (!node.children) {
-        const rows = await rowNodes(token, node.dataSourceId, node.depth + 1, node.id, memo);
-        node.children = rows;
-      }
-      node.children = await Promise.all(node.children.map((row) => buildNode(token, row, maxDepth, memo)));
-    }
-    if (node.kind === "data_source") {
-      if (node.depth + 1 > maxDepth) return node;
+      
       if (!node.children) {
         const rows = await rowNodes(token, node.dataSourceId ?? node.id, node.depth + 1, node.id, memo);
         node.children = rows;
       }
-      node.children = await Promise.all(node.children.map((row) => buildNode(token, row, maxDepth, memo)));
+      
+      node.children = await Promise.all((node.children ?? []).map((row) => buildNode(token, row, maxDepth, memo)));
     }
   } catch (err) {
     node.error = errorMessage(err);
