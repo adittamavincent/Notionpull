@@ -188,9 +188,15 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
       break;
     case "divider":
       return "---";
-        case "callout":
+    case "callout":
       content = `> [!NOTE]\n> ${text}`;
       break;
+    case "column_list":
+      // Render each column's content side-by-side on new lines (plain text fallback)
+      return children.join("\n\n") || "";
+    case "column":
+      // Transparent wrapper — just pass through children
+      return children.join("\n") || "";
     case "table": {
       const rows = b.children || [];
       if (rows.length === 0) return "";

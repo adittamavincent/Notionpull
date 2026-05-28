@@ -116,7 +116,13 @@ export default function Page() {
           return node.children?.some(child => selected.has(child.id)) ?? false;
         }
         
-        // Rows and blocks are filtered out because they will be rendered inline under their selected parent
+        // Rows with selected children (blocks inside the row's page) are kept so their content gets exported.
+        // Leaf rows (no selected children) are dropped — their data is already in the parent database table.
+        if (node.kind === "row") {
+          return node.children?.some(child => selected.has(child.id)) ?? false;
+        }
+        
+        // Blocks are always rendered inline under their parent row/page — never export standalone
         return false;
       }
       
@@ -442,8 +448,11 @@ export default function Page() {
           }
           
           const rowAlreadyInSelectedTable = node.kind === "row" && node.parentId && selected.has(node.parentId);
-          if (rowAlreadyInSelectedTable && !blocks.length) {
-             // Skip
+          // Only skip a row if: it is already rendered as a table row by the parent database
+          // AND it has no block content AND the user hasn't explicitly selected any child blocks inside it.
+          const hasSelectedChildren = node.children?.some(c => selected.has(c.id)) ?? false;
+          if (rowAlreadyInSelectedTable && !blocks.length && !hasSelectedChildren) {
+             // Skip — pure leaf row, rendered only in the parent table
           } else {
              items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth + 1 });
           }

@@ -11,14 +11,17 @@ export async function GET(request: Request, { params }: Params) {
     if (cursor) body.start_cursor = cursor;
     let rows: any;
     try {
-      rows = await notionFetch<any>(token, `/data_sources/${params.id}/query`, {
+      // Prefer the standard databases endpoint — it returns full property data.
+      // data_sources/query returns sparse rows (URL, Files, rich_text may appear empty).
+      rows = await notionFetch<any>(token, `/databases/${params.id}/query`, {
         method: "POST",
         body: JSON.stringify(body)
       });
     } catch (err: any) {
       if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
         try {
-          rows = await notionFetch<any>(token, `/databases/${params.id}/query`, {
+          // Fall back to data_sources endpoint for non-database data sources
+          rows = await notionFetch<any>(token, `/data_sources/${params.id}/query`, {
             method: "POST",
             body: JSON.stringify(body)
           });
