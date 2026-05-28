@@ -14,8 +14,8 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 ## Run
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open `http://localhost:3000`.
