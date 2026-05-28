@@ -32,3 +32,4 @@ Open `http://localhost:3000`.
 - Database exports correctly include the full column list and structural schema metadata (including column names, types, options, and descriptions) even for empty databases with zero rows/entries.
 - Block-level URL detection allows directly pasting block-level links (like table blocks) into the query input to fetch, traverse, and export their child elements.
 - Simple tables (`table` and `table_row` blocks) are fully supported in exports, parsing individual row cells recursively and auto-generating standard Markdown tables with correct column-separator formatting.
+- Linked databases and linked pages (`link_to_page` blocks) are seamlessly detected, fetched, and fully supported, resolving to their target configurations during navigation and markdown export.

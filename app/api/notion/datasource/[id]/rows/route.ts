@@ -9,10 +9,26 @@ export async function GET(request: Request, { params }: Params) {
     const cursor = new URL(request.url).searchParams.get("cursor");
     const body: Record<string, unknown> = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
-    const rows = await notionFetch<any>(token, `/data_sources/${params.id}/query`, {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
+    let rows: any;
+    try {
+      rows = await notionFetch<any>(token, `/data_sources/${params.id}/query`, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+    } catch (err: any) {
+      if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
+        try {
+          rows = await notionFetch<any>(token, `/databases/${params.id}/query`, {
+            method: "POST",
+            body: JSON.stringify(body)
+          });
+        } catch {
+          throw err; // Throw original error if both fail
+        }
+      } else {
+        throw err;
+      }
+    }
     rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? []));
     return Response.json(rows);
   } catch (error) {

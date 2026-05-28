@@ -23,7 +23,7 @@ export async function GET(request: Request) {
         type: "database",
         id: database.id,
         title: databaseTitle(database),
-        dataSourceId: database.data_sources?.[0]?.id,
+        dataSourceId: database.data_sources?.[0]?.id ?? database.id,
         columns: Object.keys(database.properties ?? {}),
         properties: database.properties ?? {}
       });
@@ -48,6 +48,32 @@ export async function GET(request: Request) {
 
     if (blockRes.status === "fulfilled") {
         const block = blockRes.value;
+        if (block.type === "link_to_page" && block.link_to_page) {
+          const link = block.link_to_page;
+          if (link.type === "database_id" && link.database_id) {
+            try {
+              const db = await notionFetch<any>(token, `/databases/${link.database_id}`);
+              const actualDbId = db.data_sources?.[0]?.id ?? db.id;
+              return Response.json({
+                type: "database",
+                id: actualDbId,
+                title: databaseTitle(db),
+                dataSourceId: actualDbId,
+                columns: Object.keys(db.properties ?? {}),
+                properties: db.properties ?? {}
+              });
+            } catch (dbErr) {
+              throw dbErr;
+            }
+          } else if (link.type === "page_id" && link.page_id) {
+            try {
+              const pg = await notionFetch<any>(token, `/pages/${link.page_id}`);
+              return Response.json({ type: "page", id: pg.id, title: pageTitle(pg) });
+            } catch (pgErr) {
+              throw pgErr;
+            }
+          }
+        }
         return Response.json({ type: "block", id: block.id, title: blockTitle(block) || "Untitled block" });
     }
 

@@ -26,13 +26,22 @@ export async function GET(request: Request, { params }: Params) {
       }
     }
 
-    const dataSourceId = isDataSource ? database.id : database.data_sources?.[0]?.id;
-    if (!dataSourceId) return Response.json({ error: "No data source found" }, { status: 404 });
+    const dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
     
-    // If it's a data source, we already have it. If it's a database, we might want the source props specifically.
-    const dataSource = isDataSource ? database : await notionFetch<any>(token, `/data_sources/${dataSourceId}`);
+    // If it's a data source, we already have it. If it's a database, we want the source props specifically.
+    // We catch any fetch errors and fall back to the container database itself.
+    let dataSource: any = null;
+    if (!isDataSource) {
+      try {
+        dataSource = await notionFetch<any>(token, `/data_sources/${dataSourceId}`);
+      } catch {
+        dataSource = database;
+      }
+    } else {
+      dataSource = database;
+    }
     
-    const hasSourceProps = dataSource.properties && Object.keys(dataSource.properties).length > 0;
+    const hasSourceProps = dataSource?.properties && Object.keys(dataSource.properties).length > 0;
     const properties = hasSourceProps ? dataSource.properties : (database.properties ?? {});
     
     return Response.json({
