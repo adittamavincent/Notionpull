@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FileText, Database, Rows3, ChevronRight, ChevronDown, Settings2, AlertTriangle } from "lucide-react";
+import { FileText, Database, Rows3, ChevronRight, ChevronDown, Settings2, AlertTriangle, Table } from "lucide-react";
 import type { TreeNodeData } from "@/types/notion";
 
 type Props = {
@@ -53,6 +53,8 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
       case "database":
       case "data_source": return <Database className="h-4 w-4 text-blue-500" />;
       case "row": return <Rows3 className="h-4 w-4 text-emerald-500" />;
+      case "table": return <Table className="h-4 w-4 text-purple-500" />;
+      case "table_row": return <Rows3 className="h-4 w-4 text-purple-400" />;
       case "block": return <Rows3 className="h-4 w-4 text-zinc-400" />;
       default: return <FileText className="h-4 w-4 text-zinc-500" />;
     }

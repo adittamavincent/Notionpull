@@ -168,6 +168,11 @@ export function blockTitle(block: any): string {
   if (block.type === "equation") return "Equation block";
   if (block.type === "breadcrumb") return "Breadcrumb";
   if (block.type === "table_of_contents") return "Table of Contents";
+  if (block.type === "table") return "Table";
+  if (block.type === "table_row") {
+    const cells = block.table_row?.cells ?? [];
+    return cells.map((cell: any) => plainText(cell)).filter(Boolean).join(" | ") || "Empty row";
+  }
   
   return "";
 }
@@ -216,5 +221,5 @@ export function notionErrorResponse(error: unknown): Response {
 }
 
 export function isExportableBlock(block: NotionBlock): boolean {
-  return ["paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "to_do", "quote", "code", "divider", "callout"].includes(block.type);
+  return ["paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "to_do", "quote", "code", "divider", "callout", "table", "table_row"].includes(block.type);
 }

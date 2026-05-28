@@ -6,15 +6,19 @@ type Params = { params: { id: string } };
 export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
-    const blocks = await getChildren(token, params.id, 0);
+    const { searchParams } = new URL(request.url);
+    const depthParam = searchParams.get("depth");
+    const maxDepth = depthParam === "All" || !depthParam ? 20 : Number(depthParam);
+
+    const blocks = await getChildren(token, params.id, 0, maxDepth);
     return Response.json({ results: blocks });
   } catch (error) {
     return notionErrorResponse(error);
   }
 }
 
-async function getChildren(token: string, blockId: string, depth: number): Promise<NotionBlock[]> {
-  if (depth > 20) return [];
+async function getChildren(token: string, blockId: string, depth: number, maxDepth: number): Promise<NotionBlock[]> {
+  if (depth >= maxDepth) return [];
   const blocks: NotionBlock[] = [];
   let start_cursor: string | undefined;
   do {
@@ -22,8 +26,8 @@ async function getChildren(token: string, blockId: string, depth: number): Promi
     if (start_cursor) qs.set("start_cursor", start_cursor);
     const body: any = await notionFetch(token, `/blocks/${blockId}/children?${qs.toString()}`);
     for (const block of body.results) {
-      if (block.has_children) {
-        block.children = await getChildren(token, block.id, depth + 1);
+      if (block.has_children && (depth + 1 < maxDepth)) {
+        block.children = await getChildren(token, block.id, depth + 1, maxDepth);
       }
       
       // Filter out truly empty blocks

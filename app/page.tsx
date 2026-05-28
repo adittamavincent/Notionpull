@@ -97,7 +97,33 @@ export default function Page() {
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
   // Use unique set of top-level selected nodes to avoid duplicates when parent and child are both selected
-  const selectedNodes = useMemo(() => flatNodes.filter((node) => selected.has(node.id) && (!node.parentId || !selected.has(node.parentId))), [flatNodes, selected]);
+  const selectedNodes = useMemo(() => {
+    return flatNodes.filter((node) => {
+      if (!selected.has(node.id)) return false;
+      
+      // The root node is always kept
+      if (!node.parentId) return true;
+      
+      const parentIsSelected = selected.has(node.parentId);
+      
+      // If the parent is selected:
+      if (parentIsSelected) {
+        // Databases/data sources are always kept to allow parent pages to dynamically embed them
+        if (node.kind === "database" || node.kind === "data_source") return true;
+        
+        // Pages are kept only if they have selected children in the tree (so they are structural, not leaf links)
+        if (node.kind === "page") {
+          return node.children?.some(child => selected.has(child.id)) ?? false;
+        }
+        
+        // Rows and blocks are filtered out because they will be rendered inline under their selected parent
+        return false;
+      }
+      
+      // If the parent is NOT selected, we always keep the node to ensure it gets exported
+      return true;
+    });
+  }, [flatNodes, selected]);
 
   useEffect(() => {
     if (!lastFetch) {
@@ -345,16 +371,13 @@ export default function Page() {
             })
           );
             
-          let exportRows = allRows;
+          let exportRows: NotionPage[] = [];
           
-          // If rows are loaded in the tree (depth >= 2), filter by what's checked
+          // Only export rows that are actually loaded and checked/selected in the tree view.
+          // If rows are not loaded (due to depth limit) or none are selected, export empty rows.
           if (node.children && node.children.length > 0) {
             const selectedRowIds = new Set(node.children.filter(c => selected.has(c.id)).map(c => c.id));
-            // Only filter if some children of the database are NOT selected
-            // (If all are selected, exportRows = allRows is fine)
-            if (selectedRowIds.size < node.children.length) {
-                exportRows = allRows.filter(row => selectedRowIds.has(row.id));
-            }
+            exportRows = allRows.filter(row => selectedRowIds.has(row.id));
           }
           
           items.push({ 
@@ -365,7 +388,7 @@ export default function Page() {
             columns: database.columns ?? node.columns,
             selectedColumns: node.selectedColumns,
             properties: database.properties,
-            depth: node.depth
+            depth: node.depth + 1
           });
         } else {
           // Page/Row/Block fetching
@@ -374,8 +397,8 @@ export default function Page() {
           let blocks: NotionBlock[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
-              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}`, () => 
-                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content`)
+              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () => 
+                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`)
               );
               blocks = body.results;
 
@@ -385,14 +408,22 @@ export default function Page() {
                   const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${block.id}`);
                   const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId));
                   
+                  // Filter nested database rows based on whether their tree node row IDs are selected
+                  const dbTreeNode = flatNodes.find(n => n.id === block.id);
+                  let exportDbRows: NotionPage[] = [];
+                  if (dbTreeNode && dbTreeNode.children && dbTreeNode.children.length > 0) {
+                    const selectedRowIds = new Set(dbTreeNode.children.filter(c => selected.has(c.id)).map(c => c.id));
+                    exportDbRows = dbRows.filter(row => selectedRowIds.has(row.id));
+                  }
+
                   items.push({
                     kind: "database",
                     id: block.id,
                     title: block.child_database?.title ?? "Untitled database",
-                    rows: dbRows,
+                    rows: exportDbRows,
                     columns: dbMetadata.columns,
                     properties: dbMetadata.properties,
-                    depth: (node.depth ?? 0) + 1
+                    depth: (node.depth ?? 0) + 2
                   });
                 }
               }
@@ -414,7 +445,7 @@ export default function Page() {
           if (rowAlreadyInSelectedTable && !blocks.length) {
              // Skip
           } else {
-            items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
+             items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth + 1 });
           }
         }
         

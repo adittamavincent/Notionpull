@@ -1,4 +1,4 @@
-import { databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, tokenFromRequest } from "@/lib/notion";
 import type { NotionDatabase, NotionPage } from "@/types/notion";
 
 export async function GET(request: Request) {
@@ -11,10 +11,11 @@ export async function GET(request: Request) {
     const results = await Promise.allSettled([
       notionFetch<NotionDatabase>(token, `/databases/${id}`),
       notionFetch<any>(token, `/data_sources/${id}`),
-      notionFetch<NotionPage>(token, `/pages/${id}`)
+      notionFetch<NotionPage>(token, `/pages/${id}`),
+      notionFetch<any>(token, `/blocks/${id}`)
     ]);
 
-    const [dbRes, dsRes, pageRes] = results;
+    const [dbRes, dsRes, pageRes, blockRes] = results;
 
     if (dbRes.status === "fulfilled") {
       const database = dbRes.value;
@@ -45,8 +46,13 @@ export async function GET(request: Request) {
         return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
     }
 
+    if (blockRes.status === "fulfilled") {
+        const block = blockRes.value;
+        return Response.json({ type: "block", id: block.id, title: blockTitle(block) || "Untitled block" });
+    }
+
     // If all failed, throw the first "real" error or the last error
-    const firstError = [dbRes, dsRes, pageRes].find(r => r.status === "rejected" && !isProbeMiss((r as PromiseRejectedResult).reason));
+    const firstError = [dbRes, dsRes, pageRes, blockRes].find(r => r.status === "rejected" && !isProbeMiss((r as PromiseRejectedResult).reason));
     if (firstError) throw (firstError as PromiseRejectedResult).reason;
 
     throw new Error("Object not found or no access");
@@ -58,5 +64,5 @@ export async function GET(request: Request) {
 function isProbeMiss(error: unknown): boolean {
   if (!(error instanceof NotionApiError)) return false;
   if (error.status === 404) return true;
-  return error.status === 400 && /is a (page|database|data source|data_source), not a (page|database|data source|data_source)/i.test(error.message);
+  return error.status === 400 && /is a (page|database|data source|data_source|block), not a (page|database|data source|data_source|block)/i.test(error.message);
 }

@@ -188,9 +188,39 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
       break;
     case "divider":
       return "---";
-    case "callout":
+        case "callout":
       content = `> [!NOTE]\n> ${text}`;
       break;
+    case "table": {
+      const rows = b.children || [];
+      if (rows.length === 0) return "";
+      const mdRows: string[] = [];
+      let numColumns = 0;
+      
+      for (const rowBlock of rows) {
+        if (rowBlock.type !== "table_row") continue;
+        const rowData = rowBlock.table_row;
+        if (!rowData || !rowData.cells) continue;
+        const cells = rowData.cells.map((cell: any) => {
+          return escapeMarkdown(richTextToPlainText(cell));
+        });
+        if (cells.length > numColumns) {
+          numColumns = cells.length;
+        }
+        mdRows.push(`| ${cells.join(" | ")} |`);
+      }
+      
+      if (mdRows.length === 0) return "";
+      
+      const separator = `| ${Array(numColumns).fill("---").join(" | ")} |`;
+      mdRows.splice(1, 0, separator);
+      
+      return mdRows.join("\n");
+    }
+    case "table_row": {
+      const cells = data?.cells?.map((cell: any) => escapeMarkdown(richTextToPlainText(cell))) ?? [];
+      return `| ${cells.join(" | ")} |`;
+    }
     case "child_database":
       if (dbById && renderedDbIds && options) {
         const dbId = b.id;

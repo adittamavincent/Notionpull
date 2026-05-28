@@ -36,7 +36,7 @@ export async function GET(request: Request, { params }: Params) {
           // Keep blocks that have children (even if they have no text themselves, they contain things)
           if (node.hasChildren) return true;
           // Keep special visual blocks
-          if (["divider", "image", "video", "file", "pdf", "equation"].includes(node.kind)) return true;
+          if (["divider", "image", "video", "file", "pdf", "equation", "table", "table_row"].includes(node.kind)) return true;
           
           return false;
         })
