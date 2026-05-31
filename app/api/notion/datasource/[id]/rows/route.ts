@@ -30,17 +30,13 @@ export async function GET(request: Request, { params }: Params) {
 
 async function resolveDataSourceId(token: string, id: string, kind: string | null): Promise<string> {
   if (kind === "data_source") return id;
-
-  try {
+  if (kind === "database") {
     const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/database") });
-    return database.data_sources?.[0]?.id ?? id;
-  } catch (error) {
-    if (error instanceof NotionApiError && (error.status === 404 || error.status === 400)) {
-      const dataSource: any = await notionFetch(token, `/data_sources/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/data-source") });
-      return dataSource.id;
-    }
-    throw error;
+    return database.data_sources?.[0]?.id ?? database.id;
   }
+
+  const dataSource = await notionFetch<any>(token, `/data_sources/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/data-source") });
+  return dataSource.id;
 }
 
 async function expandRelationProperties(token: string, rows: NotionPage[], traceRoot: string): Promise<NotionPage[]> {

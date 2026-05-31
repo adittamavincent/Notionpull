@@ -379,8 +379,9 @@ export default function Page() {
           const estimatedBatches = Math.max(1, Math.ceil(estimatedRows / 100));
           const unitsPerBatch = Math.floor(UNITS_PER_NODE / (estimatedBatches + 1));
 
-          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}:${containerKind}`, () => 
-            fetchAllRows(activeToken.token, database.dataSourceId, containerKind, (count) => {
+          const rowSourceKind = resolveRowSourceKind(node.id, database.dataSourceId, node.kind);
+          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}:${rowSourceKind}`, () => 
+            fetchAllRows(activeToken.token, database.dataSourceId, rowSourceKind, (count) => {
                 const batchesDone = Math.floor(count / 100);
                 const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
                 setExportCurrent(progress);
@@ -423,7 +424,8 @@ export default function Page() {
               for (const block of blocks as any[]) {
                 if (block.type === "child_database") {
                   const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`);
-                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:database`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, "database"));
+                  const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
+                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind));
                   
                   // Filter nested database rows based on whether their tree node row IDs are selected
                   const dbTreeNode = flatNodes.find(n => n.id === block.id);
@@ -780,23 +782,18 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
     if (node.kind === "database" || node.kind === "data_source") {
-      if (!node.dataSourceId || !node.columns || !node.properties) {
-        try {
-          const metadata = await memoDatabase(token, node.id, node.kind, memo);
-          node.dataSourceId = metadata.dataSourceId;
-          node.dataSourceName = metadata.dataSourceName ?? node.dataSourceName;
-          node.columns = metadata.columns ?? node.columns;
-          node.properties = metadata.properties ?? node.properties;
-        } catch {
-          // Fallback: If it's a data_source and database fetch fails, ensure we have at least an empty props object
-          if (!node.properties) node.properties = {};
-        }
-      }
+      const metadata = await resolveContainerMetadata(token, node, memo);
+      node.kind = metadata.kind;
+      node.dataSourceId = metadata.dataSourceId;
+      node.dataSourceName = metadata.dataSourceName ?? node.dataSourceName;
+      node.columns = metadata.columns ?? node.columns;
+      node.properties = metadata.properties ?? node.properties;
+      const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind);
       
       if (node.depth + 1 > maxDepth) return node;
       
       if (!node.children) {
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, node.kind, node.depth + 1, node.id, memo);
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.depth + 1, node.id, memo);
         node.children = rows;
       }
       
@@ -818,6 +815,38 @@ async function rowNodes(token: string, dataSourceId: string, kind: "database" | 
     parentId,
     page: row
   }));
+}
+
+async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties">> {
+  if (node.dataSourceId && node.columns && node.properties) {
+    return {
+      kind: node.kind === "data_source" ? "data_source" : "database",
+      dataSourceId: node.dataSourceId,
+      dataSourceName: node.dataSourceName,
+      columns: node.columns,
+      properties: node.properties,
+    };
+  }
+
+  try {
+    const metadata = await memoDatabase(token, node.id, node.kind === "data_source" ? "data_source" : "database", memo);
+    return {
+      kind: node.kind === "data_source" ? "data_source" : "database",
+      dataSourceId: metadata.dataSourceId,
+      dataSourceName: metadata.dataSourceName ?? node.dataSourceName,
+      columns: metadata.columns,
+      properties: metadata.properties,
+    };
+  } catch {
+    const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`);
+    return {
+      kind: detected.type === "data_source" ? "data_source" : "database",
+      dataSourceId: detected.dataSourceId ?? node.id,
+      dataSourceName: detected.dataSourceName ?? node.dataSourceName,
+      columns: detected.columns ?? node.columns,
+      properties: detected.properties ?? node.properties,
+    };
+  }
 }
 
 function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promise<PageChildrenResponse> {
@@ -846,6 +875,11 @@ function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () =
   });
   cache.set(key, request);
   return request;
+}
+
+function resolveRowSourceKind(containerId: string, dataSourceId: string | undefined, kind: "database" | "data_source"): "database" | "data_source" {
+  if (dataSourceId && dataSourceId !== containerId) return "data_source";
+  return kind === "data_source" ? "data_source" : "database";
 }
 
 async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", onProgress?: (count: number) => void): Promise<NotionPage[]> {

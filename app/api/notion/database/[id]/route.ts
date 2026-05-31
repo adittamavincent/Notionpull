@@ -8,28 +8,11 @@ export async function GET(request: Request, { params }: Params) {
     const token = tokenFromRequest(request);
     const kind = new URL(request.url).searchParams.get("kind");
     const traceRoot = `database/${params.id}`;
-    
-    const preferDataSource = kind === "data_source";
-    const preferred = preferDataSource ? `/data_sources/${params.id}` : `/databases/${params.id}`;
-    const fallback = preferDataSource ? `/databases/${params.id}` : `/data_sources/${params.id}`;
 
-    let database: any;
-    let isDataSource = false;
-    try {
-      database = await notionFetch<any>(token, preferred, {}, { tracePath: traceChild(traceRoot, preferDataSource ? "data-source" : "database") });
-      isDataSource = preferDataSource;
-    } catch (err: any) {
-      if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
-        try {
-          database = await notionFetch<any>(token, fallback, {}, { tracePath: traceChild(traceRoot, "fallback") });
-          isDataSource = fallback.includes("/data_sources/");
-        } catch {
-          throw err;
-        }
-      } else {
-        throw err;
-      }
-    }
+    const isDataSource = kind === "data_source";
+    const database = isDataSource
+      ? await notionFetch<any>(token, `/data_sources/${params.id}`, {}, { tracePath: traceChild(traceRoot, "data-source") })
+      : await notionFetch<any>(token, `/databases/${params.id}`, {}, { tracePath: traceChild(traceRoot, "database") });
 
     const dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
     const dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
