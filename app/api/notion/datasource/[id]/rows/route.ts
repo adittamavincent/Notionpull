@@ -7,35 +7,38 @@ export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
     const cursor = new URL(request.url).searchParams.get("cursor");
+    const kind = new URL(request.url).searchParams.get("kind");
     const body: Record<string, unknown> = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
     let rows: any;
     try {
-      // Prefer the standard databases endpoint — it returns full property data.
-      // data_sources/query returns sparse rows (URL, Files, rich_text may appear empty).
-      rows = await notionFetch<any>(token, `/databases/${params.id}/query`, {
+      const dataSourceId = await resolveDataSourceId(token, params.id, kind);
+      rows = await notionFetch<any>(token, `/data_sources/${dataSourceId}/query`, {
         method: "POST",
         body: JSON.stringify(body)
       });
     } catch (err: any) {
-      if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
-        try {
-          // Fall back to data_sources endpoint for non-database data sources
-          rows = await notionFetch<any>(token, `/data_sources/${params.id}/query`, {
-            method: "POST",
-            body: JSON.stringify(body)
-          });
-        } catch {
-          throw err; // Throw original error if both fail
-        }
-      } else {
-        throw err;
-      }
+      throw err;
     }
     rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? []));
     return Response.json(rows);
   } catch (error) {
     return notionErrorResponse(error);
+  }
+}
+
+async function resolveDataSourceId(token: string, id: string, kind: string | null): Promise<string> {
+  if (kind === "data_source") return id;
+
+  try {
+    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
+    return database.data_sources?.[0]?.id ?? id;
+  } catch (error) {
+    if (error instanceof NotionApiError && (error.status === 404 || error.status === 400)) {
+      const dataSource: any = await notionFetch(token, `/data_sources/${id}`);
+      return dataSource.id;
+    }
+    throw error;
   }
 }
 
@@ -129,8 +132,8 @@ function applyRelationTitles(value: any, titles: Map<string, string>) {
 
 async function fetchObjectTitle(token: string, id: string): Promise<string> {
   try {
-    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
-    return databaseTitle(database);
+    const page = await notionFetch<NotionPage>(token, `/pages/${id}`);
+    return pageTitle(page);
   } catch (error) {
     if (!isProbeMiss(error)) return "";
   }
@@ -143,8 +146,8 @@ async function fetchObjectTitle(token: string, id: string): Promise<string> {
   }
 
   try {
-    const page = await notionFetch<NotionPage>(token, `/pages/${id}`);
-    return pageTitle(page);
+    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
+    return databaseTitle(database);
   } catch {
     return "";
   }

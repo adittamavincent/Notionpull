@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Activity, RefreshCw, Trash2, ChevronRight, ChevronDown, TerminalSquare, Copy, Check } from "lucide-react";
 import type { LogEntry } from "@/lib/logger";
 
@@ -7,6 +7,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const clearedAtRef = useRef(0);
 
   const handleCopySurfaceLogs = async () => {
     if (logs.length === 0) return;
@@ -35,8 +36,11 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     try {
       const res = await fetch(`/api/notion/debug?_t=${Date.now()}`);
       if (res.ok) {
-        const data = await res.json();
-        setLogs(data);
+        const data = (await res.json()) as LogEntry[];
+        const nextLogs = clearedAtRef.current > 0
+          ? data.filter((log) => log.timestamp >= clearedAtRef.current)
+          : data;
+        setLogs(nextLogs);
       }
     } catch (err) {
       console.error("Failed to fetch logs", err);
@@ -47,9 +51,11 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
 
   const clearLogs = async () => {
     try {
-      await fetch("/api/notion/debug", { method: "DELETE" });
+      clearedAtRef.current = Date.now();
       setLogs([]);
       setExpandedId(null);
+      await fetch("/api/notion/debug", { method: "DELETE" });
+      void fetchLogs();
     } catch (err) {
       console.error("Failed to clear logs", err);
     }
@@ -57,11 +63,22 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
 
   useEffect(() => {
     if (open) {
+      clearedAtRef.current = 0;
       fetchLogs();
       const interval = setInterval(fetchLogs, 5000);
-      return () => clearInterval(interval);
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          onClose();
+        }
+      };
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener("keydown", handleKeyDown);
+      };
     }
-  }, [open]);
+  }, [open, onClose]);
 
   if (!open) return null;
 

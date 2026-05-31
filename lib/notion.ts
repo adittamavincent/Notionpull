@@ -210,6 +210,8 @@ export async function notionFetch<T>(
     requestBody,
   };
 
+  let capturedError: any = null;
+
   try {
     const response = await fetch(url, {
       ...init,
@@ -266,24 +268,25 @@ export async function notionFetch<T>(
       logEntry.responseBody = responseBodyText;
     }
 
-    addLog(logEntry);
-
     if (!response.ok) {
       let message = response.statusText;
       if (responseBodyJson?.message) {
         message = responseBodyJson.message;
       }
-      throw new NotionApiError(response.status, message);
+      capturedError = new NotionApiError(response.status, message);
     }
 
-    return responseBodyJson as T;
+    if (!capturedError) return responseBodyJson as T;
   } catch (error: any) {
+    capturedError = error;
+  } finally {
     if (!logEntry.duration) logEntry.duration = Date.now() - start;
-    if (!logEntry.status) logEntry.status = error.status || 500;
-    logEntry.error = error.message || String(error);
+    if (capturedError && !logEntry.status) logEntry.status = capturedError.status || 500;
+    if (capturedError) logEntry.error = capturedError.message || String(capturedError);
     addLog(logEntry);
-    throw error;
   }
+
+  throw capturedError;
 }
 
 export function tokenFromRequest(request: Request): string {

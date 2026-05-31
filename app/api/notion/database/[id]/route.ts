@@ -6,20 +6,24 @@ type Params = { params: { id: string } };
 export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
+    const kind = new URL(request.url).searchParams.get("kind");
     
-    // Try as database first
+    const preferDataSource = kind === "data_source";
+    const preferred = preferDataSource ? `/data_sources/${params.id}` : `/databases/${params.id}`;
+    const fallback = preferDataSource ? `/databases/${params.id}` : `/data_sources/${params.id}`;
+
     let database: any;
     let isDataSource = false;
     try {
-      database = await notionFetch<NotionDatabase>(token, `/databases/${params.id}`);
+      database = await notionFetch<any>(token, preferred);
+      isDataSource = preferDataSource;
     } catch (err: any) {
       if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
-        // Try as data source
         try {
-          database = await notionFetch<any>(token, `/data_sources/${params.id}`);
-          isDataSource = true;
+          database = await notionFetch<any>(token, fallback);
+          isDataSource = fallback.includes("/data_sources/");
         } catch {
-          throw err; // Throw original error if both fail
+          throw err;
         }
       } else {
         throw err;

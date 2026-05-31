@@ -61,7 +61,8 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
     if (nodeRows.length === 0 && fetchedRows.length === 0 && token) {
       setLoading(true);
       const dataSourceId = node.dataSourceId ?? node.id;
-      fetch(`/api/notion/datasource/${dataSourceId}/rows`, {
+      const kind = node.kind === "data_source" ? "data_source" : "database";
+      fetch(`/api/notion/datasource/${dataSourceId}/rows?kind=${encodeURIComponent(kind)}`, {
         headers: { "x-notion-token": token }
       })
         .then(res => res.json())
