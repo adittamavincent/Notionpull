@@ -238,6 +238,9 @@ export default function Page() {
         title: object.title,
         kind: object.type,
         depth: 0,
+        viewId: object.viewId,
+        views: object.views,
+        columnDetails: object.columnDetails,
         dataSourceId: object.dataSourceId,
         dataSourceName: object.dataSourceName,
         columns: object.columns,
@@ -322,7 +325,11 @@ export default function Page() {
     const updateNode = (list: TreeNodeData[]): TreeNodeData[] => {
       return list.map(n => {
         if (n.id === nodeId) {
-          return { ...n, selectedColumns };
+          const updatedColumnDetails = n.columnDetails?.map(col => ({
+            ...col,
+            visible: selectedColumns.includes(col.name)
+          }));
+          return { ...n, selectedColumns, columnDetails: updatedColumnDetails };
         }
         if (n.children) {
           return { ...n, children: updateNode(n.children) };
@@ -370,8 +377,8 @@ export default function Page() {
         if (node.kind === "database" || node.kind === "data_source") {
           const containerKind = node.kind === "data_source" ? "data_source" : "database";
           const database = node.dataSourceId && node.columns && node.properties
-            ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties }
-            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${node.id}?kind=${encodeURIComponent(containerKind)}`);
+            ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties, columnDetails: node.columnDetails }
+            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${node.id}?kind=${encodeURIComponent(containerKind)}`);
           
           // Estimate number of batches to give granular progress
           // Notion usually fetches in batches of 100
@@ -405,6 +412,9 @@ export default function Page() {
             rows: exportRows, 
             columns: database.columns ?? node.columns,
             selectedColumns: node.selectedColumns,
+            columnDetails: database.columnDetails ?? node.columnDetails,
+            viewId: node.viewId,
+            viewTitle: node.views?.find((view) => view.id === node.viewId)?.title,
             properties: database.properties,
             depth: node.depth + 1
           });
@@ -423,7 +433,7 @@ export default function Page() {
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
                 if (block.type === "child_database") {
-                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any> }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`);
+                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`);
                   const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
                   const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind));
                   
@@ -441,6 +451,9 @@ export default function Page() {
                     title: block.child_database?.title ?? "Untitled database",
                     rows: exportDbRows,
                     columns: dbMetadata.columns,
+                    columnDetails: dbMetadata.columnDetails ?? dbTreeNode?.columnDetails,
+                    viewId: dbTreeNode?.viewId,
+                    viewTitle: dbTreeNode?.views?.find((view) => view.id === dbTreeNode.viewId)?.title,
                     properties: dbMetadata.properties,
                     depth: (node.depth ?? 0) + 2
                   });
@@ -757,7 +770,7 @@ function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
 }
 
 type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database" | "block"; title: string; dataSourceName?: string }> };
-type DatabaseResponse = { dataSourceId: string; dataSourceName?: string; title: string; columns?: string[]; properties?: Record<string, any> };
+type DatabaseResponse = { dataSourceId: string; dataSourceName?: string; title: string; viewId?: string; views?: Array<{ id: string; title?: string }>; columnDetails?: Array<{ id?: string; name: string; visible?: boolean; width?: number }>; columns?: string[]; selectedColumns?: string[]; properties?: Record<string, any> };
 type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
   databases: Map<string, Promise<DatabaseResponse>>;
@@ -784,11 +797,14 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
     if (node.kind === "database" || node.kind === "data_source") {
       const metadata = await resolveContainerMetadata(token, node, memo);
       node.kind = metadata.kind;
+      node.viewId = node.viewId ?? metadata.viewId;
       node.dataSourceId = metadata.dataSourceId;
       node.dataSourceName = metadata.dataSourceName ?? node.dataSourceName;
       node.columns = metadata.columns ?? node.columns;
+      node.selectedColumns = metadata.selectedColumns ?? node.selectedColumns;
+      node.columnDetails = metadata.columnDetails ?? node.columnDetails;
       node.properties = metadata.properties ?? node.properties;
-      const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind);
+      const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind as "database" | "data_source");
       
       if (node.depth + 1 > maxDepth) return node;
       
@@ -817,34 +833,47 @@ async function rowNodes(token: string, dataSourceId: string, kind: "database" | 
   }));
 }
 
-async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties">> {
+async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails">> {
   if (node.dataSourceId && node.columns && node.properties) {
     return {
       kind: node.kind === "data_source" ? "data_source" : "database",
       dataSourceId: node.dataSourceId,
       dataSourceName: node.dataSourceName,
       columns: node.columns,
+      views: node.views,
+      columnDetails: node.columnDetails,
       properties: node.properties,
+      viewId: node.viewId,
+      selectedColumns: node.selectedColumns
     };
   }
 
   try {
-    const metadata = await memoDatabase(token, node.id, node.kind === "data_source" ? "data_source" : "database", memo);
+    const metadata = await memoDatabase(token, node.id, node.kind === "data_source" ? "data_source" : "database", node.viewId, memo);
     return {
       kind: node.kind === "data_source" ? "data_source" : "database",
       dataSourceId: metadata.dataSourceId,
       dataSourceName: metadata.dataSourceName ?? node.dataSourceName,
       columns: metadata.columns,
+      selectedColumns: metadata.selectedColumns,
+      views: metadata.views ?? node.views,
+      columnDetails: metadata.columnDetails ?? node.columnDetails,
       properties: metadata.properties,
+      viewId: metadata.viewId,
     };
   } catch {
-    const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`);
+    const viewQuery = node.viewId ? `&viewId=${encodeURIComponent(node.viewId)}` : "";
+    const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}${viewQuery}`);
     return {
       kind: detected.type === "data_source" ? "data_source" : "database",
       dataSourceId: detected.dataSourceId ?? node.id,
       dataSourceName: detected.dataSourceName ?? node.dataSourceName,
       columns: detected.columns ?? node.columns,
+      selectedColumns: detected.selectedColumns ?? node.selectedColumns,
+      views: detected.views ?? node.views,
+      columnDetails: detected.columnDetails ?? node.columnDetails,
       properties: detected.properties ?? node.properties,
+      viewId: detected.viewId ?? node.viewId,
     };
   }
 }
@@ -855,9 +884,10 @@ function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promi
   ));
 }
 
-function memoDatabase(token: string, databaseId: string, kind: "database" | "data_source", memo: BuildMemo): Promise<DatabaseResponse> {
-  return memoFetch(memo.databases, `${token}:database:${databaseId}:${kind}`, () => (
-    apiFetch<DatabaseResponse>(token, `/api/notion/database/${databaseId}?kind=${encodeURIComponent(kind)}`)
+function memoDatabase(token: string, databaseId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo): Promise<DatabaseResponse> {
+  const viewQuery = viewId ? `&viewId=${encodeURIComponent(viewId)}` : "";
+  return memoFetch(memo.databases, `${token}:database:${databaseId}:${kind}:${viewId ?? ""}`, () => (
+    apiFetch<DatabaseResponse>(token, `/api/notion/database/${databaseId}?kind=${encodeURIComponent(kind)}${viewQuery}`)
   ));
 }
 

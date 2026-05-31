@@ -5,7 +5,7 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 ## Features
 
 - **Finder-like Navigation:** Expandable list view for browsing nested Notion structures with intuitive icons.
-- **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview. Database views are automatically detected from URLs to perfectly respect your configured property ordering and visibility.
+- **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview. Database views are automatically detected from URLs to perfectly respect your configured property ordering, column visibility, and widths. Full column details (ordering, widths, and visibility) are perfectly preserved during database configurations and fully exported ready.
 - **Simple Table Support:** Seamlessly detects, displays, and formats standard Notion simple tables into pristine Markdown tables, including granular selection of individual rows.
 - **Smart Caching:** Local memory caching ensures that returning to a previously fetched depth level is instant. 
 - **Recent URLs:** Quick access to recently fetched Notion URLs.
@@ -31,7 +31,7 @@ Open `http://localhost:3000`.
 - Notion API version is `2026-03-11`.
 - Database rows use `POST /v1/databases/{id}/query` (full property data), falling back to `POST /v1/data_sources/{id}/query` for non-database data sources. The `data_sources` query endpoint returns sparse rows where URL, Files, and rich_text properties may appear empty even when they contain data.
 - Notion ID parser extracts both 32-character compact IDs and 36-character standard UUIDs from any shared URL, preserving hyphen boundaries and safely ignoring preceding slugs.
-- URL parsing automatically extracts view IDs (`?v=...`) and uses the Views API to perfectly mirror property order and column visibility defined in Notion database views.
+- URL parsing automatically extracts view IDs (`?v=...`) and uses the Views API to perfectly mirror property order and column visibility defined in Notion database views. If no view ID is present, it automatically defaults to the primary database view. Because List Views responses are minimal by design (returning only ID references), each view is dynamically and resiliently retrieved in parallel. To support complex layout structures robustly, view configuration properties (column order, visibility, etc.) and titles are extracted using dynamic nesting detection to support both direct configuration fields and type-specific nested fields (such as `view.view.configuration` or `view.table.configuration`).
 - Column definitions for empty databases (databases with zero rows/entries) are correctly resolved by falling back to the static database schema (`database.properties`) instead of returning empty properties.
 - Database exports correctly include the full column list and structural schema metadata (including column names, types, options, and descriptions) even for empty databases with zero rows/entries.
 - Block-level URL detection allows directly pasting block-level links (like table blocks) into the query input to fetch, traverse, and export their child elements.

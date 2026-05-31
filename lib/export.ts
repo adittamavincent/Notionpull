@@ -7,6 +7,9 @@ export type DatabaseExportItem = {
   rows: NotionPage[]; 
   columns?: string[]; 
   selectedColumns?: string[];
+  columnDetails?: Array<{ id?: string; name: string; visible?: boolean; width?: number }>;
+  viewId?: string;
+  viewTitle?: string;
   properties?: Record<string, any>;
   depth?: number;
   id?: string;
@@ -73,6 +76,18 @@ function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): s
     head.push(`**Props:** ${metadataLines.join("; ")}`);
   }
 
+  const viewLine = getViewLine(item);
+  if (viewLine) {
+    head.push("");
+    head.push(`**View:** ${viewLine}`);
+  }
+
+  const columnLine = getColumnLine(item);
+  if (columnLine) {
+    head.push("");
+    head.push(`**Columns:** ${columnLine}`);
+  }
+
   if (!columns.length) return head.join("\n") + "\n\n_Empty_";
   
   head.push("");
@@ -107,6 +122,22 @@ function getMetadataLines(item: DatabaseExportItem): string[] {
     }
   }
   return metadataLines;
+}
+
+function getViewLine(item: DatabaseExportItem): string {
+  if (!item.viewId && !item.viewTitle) return "";
+  if (item.viewTitle && item.viewId) return `${item.viewTitle} (${item.viewId})`;
+  return item.viewTitle || item.viewId || "";
+}
+
+function getColumnLine(item: DatabaseExportItem): string {
+  const details = item.columnDetails ?? [];
+  if (details.length === 0) return "";
+  return details.map((column) => {
+    const state = column.visible === false ? "hidden" : "visible";
+    const width = column.width !== undefined ? `, ${column.width}px` : "";
+    return `${column.name} [${state}${width}]`;
+  }).join("; ");
 }
 
 function databaseColumns(item: DatabaseExportItem): string[] {

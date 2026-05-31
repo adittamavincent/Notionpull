@@ -1,4 +1,4 @@
-import { databaseTitle, NotionApiError, notionErrorResponse, notionFetch, traceChild, tokenFromRequest } from "@/lib/notion";
+import { databaseTitle, notionErrorResponse, notionFetch, traceChild, tokenFromRequest } from "@/lib/notion";
 import type { NotionDatabase } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -7,6 +7,7 @@ export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
     const kind = new URL(request.url).searchParams.get("kind");
+    const viewId = new URL(request.url).searchParams.get("viewId");
     const traceRoot = `database/${params.id}`;
 
     const isDataSource = kind === "data_source";
@@ -16,6 +17,37 @@ export async function GET(request: Request, { params }: Params) {
 
     const dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
     const dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
+    let views: Array<{ id: string; title?: string; configuration?: any }> = [];
+    let activeView: any = null;
+    if (!isDataSource) {
+      try {
+        const viewList = await notionFetch<any>(token, `/views?database_id=${encodeURIComponent(database.id)}`, {}, { tracePath: traceChild(traceRoot, "views") });
+        const viewIds = (viewList.results ?? []).map((view: any) => view.id).filter(Boolean);
+        views = await Promise.all(viewIds.map(async (id: string) => {
+          try {
+            const view = await notionFetch<any>(token, `/views/${id}`, {}, { tracePath: traceChild(traceRoot, `views/${id}`) });
+            const viewType = view.type;
+            const configuration = view.configuration ?? (viewType && view[viewType]?.configuration) ?? view.view?.configuration;
+            return {
+              id: view.id,
+              title: view.title ?? view.name ?? (viewType && view[viewType]?.title) ?? (viewType && view[viewType]?.name),
+              configuration
+            };
+          } catch {
+            return { id };
+          }
+        }));
+      } catch {
+        views = [];
+      }
+
+      if (viewId) {
+        activeView = views.find(v => v.id === viewId);
+      }
+      if (!activeView && views.length > 0) {
+        activeView = views[0];
+      }
+    }
     
     // If it's a data source, we already have it. If it's a database, we want the source props specifically.
     // We catch any fetch errors and fall back to the container database itself.
@@ -32,13 +64,50 @@ export async function GET(request: Request, { params }: Params) {
     
     const hasSourceProps = dataSource?.properties && Object.keys(dataSource.properties).length > 0;
     const properties = hasSourceProps ? dataSource.properties : (database.properties ?? {});
+    const activeViewConfig = activeView?.configuration;
+    const viewProperties = activeViewConfig?.properties ?? [];
+    const propIdToName = Object.entries(properties).reduce((acc: Record<string, string>, [name, prop]: [string, any]) => {
+      if (prop?.id) acc[prop.id] = name;
+      return acc;
+    }, {});
+    const resolvePropertyName = (entry: any): string | undefined => {
+      const propertyId = entry?.property_id ?? entry?.propertyId;
+      const propertyName = entry?.property_name ?? entry?.propertyName ?? entry?.name;
+
+      if (propertyId && propIdToName[propertyId]) return propIdToName[propertyId];
+      if (propertyName && properties[propertyName]) return propertyName;
+      if (propertyName) return propertyName;
+      return undefined;
+    };
+
+    const columnDetails = viewProperties.map((entry: any) => {
+      const name = resolvePropertyName(entry);
+      if (!name) return null;
+      return {
+        id: entry?.property_id ?? entry?.propertyId,
+        name,
+        visible: entry?.visible !== false,
+        width: typeof entry?.width === "number" ? entry.width : undefined,
+      };
+    }).filter(Boolean) as Array<{ id?: string; name: string; visible?: boolean; width?: number }>;
+
+    const orderedViewColumns = columnDetails.map((entry) => entry.name);
+    const visibleViewColumns = columnDetails.filter((entry) => entry.visible !== false).map((entry) => entry.name);
+    const columns = orderedViewColumns.length > 0
+      ? [...orderedViewColumns, ...Object.keys(properties).filter((column) => !orderedViewColumns.includes(column))]
+      : Object.keys(properties);
     
     return Response.json({
       id: database.id,
       title: isDataSource ? (database.name ?? "Untitled data source") : databaseTitle(database),
       dataSourceId,
       dataSourceName,
-      columns: Object.keys(properties),
+      viewId: activeView?.id ?? viewId ?? undefined,
+      views,
+      activeView,
+      columnDetails,
+      columns,
+      selectedColumns: visibleViewColumns.length > 0 ? visibleViewColumns : undefined,
       properties
     });
   } catch (error) {

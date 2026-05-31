@@ -10,11 +10,40 @@ export type DetectedObject = {
   type: "page" | "database" | "data_source";
   id: string;
   title: string;
+  viewId?: string;
+  views?: NotionDatabaseView[];
+  columnDetails?: NotionColumnDetail[];
   dataSourceId?: string;
   dataSourceName?: string;
   columns?: string[];
   selectedColumns?: string[];
   properties?: Record<string, any>;
+};
+
+export type NotionDatabaseView = {
+  id: string;
+  title?: string;
+};
+
+export type NotionColumnDetail = {
+  id?: string;
+  name: string;
+  visible?: boolean;
+  width?: number;
+};
+
+export type NotionDatabaseViewDetails = {
+  id: string;
+  title?: string;
+  configuration?: {
+    properties?: Array<{
+      property_id: string;
+      visible?: boolean;
+      [key: string]: any;
+    }>;
+    [key: string]: any;
+  };
+  [key: string]: any;
 };
 
 export type TreeNodeKind = "page" | "database" | "data_source" | "row" | "block";
@@ -25,6 +54,9 @@ export type TreeNodeData = {
   kind: TreeNodeKind;
   depth: number;
   parentId?: string;
+  viewId?: string;
+  views?: NotionDatabaseView[];
+  columnDetails?: NotionColumnDetail[];
   dataSourceId?: string;
   dataSourceName?: string;
   page?: NotionPage;

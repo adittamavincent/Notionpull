@@ -138,14 +138,22 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
 
   const handleSave = useCallback(() => {
     if (!node) return;
-    onSave(node.id, Array.from(selected));
+    const orderedSelected = allColumns.filter(col => selected.has(col));
+    onSave(node.id, orderedSelected);
     onClose();
-  }, [node, onClose, onSave, selected]);
+  }, [node, onClose, onSave, selected, allColumns]);
 
   const visibleColumns = useMemo(
     () => allColumns.filter(col => selected.has(col)),
     [allColumns, selected]
   );
+
+  const orderedColumnDetails = useMemo(() => node?.columnDetails ?? [], [node?.columnDetails]);
+
+  const activeView = useMemo(() => {
+    if (!node?.viewId) return null;
+    return node.views?.find((view) => view.id === node.viewId) ?? { id: node.viewId, title: undefined };
+  }, [node?.viewId, node?.views]);
 
   if (!open || !node) return null;
 
@@ -157,6 +165,16 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
           <div>
             <h2 className="text-lg font-semibold text-zinc-900">Configure Database</h2>
             <p className="text-sm text-zinc-500">{node.title}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                {activeView ? `View: ${activeView.title || activeView.id}` : "View: default schema"}
+              </span>
+              {node.views?.length ? (
+                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                  {node.views.length} views available
+                </span>
+              ) : null}
+            </div>
           </div>
           <button onClick={onClose} className="rounded-md p-2 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600">
             <X className="h-5 w-5" />
@@ -170,6 +188,43 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
               {visibleColumns.length} of {allColumns.length} columns selected
             </p>
           </div>
+
+          {node.views?.length ? (
+            <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Database views</div>
+              <div className="flex flex-wrap gap-2">
+                {node.views.map((view) => (
+                  <span
+                    key={view.id}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium ${view.id === node.viewId ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-600"}`}
+                    title={view.id}
+                  >
+                    {view.title || view.id}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {orderedColumnDetails.length > 0 ? (
+            <div className="mb-4 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Ordered columns</div>
+              <div className="space-y-1.5">
+                {orderedColumnDetails.map((column) => (
+                  <div key={`${column.id ?? column.name}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${column.visible ? "bg-emerald-500" : "bg-zinc-300"}`} />
+                      <span className="font-medium text-zinc-800">{column.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-zinc-500">
+                      {column.id ? <span>{column.id}</span> : null}
+                      {column.width !== undefined ? <span>{column.width}px</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
             
             <div className="flex-1 overflow-auto rounded-lg border border-zinc-200">
               <table className="w-full text-left text-sm text-zinc-600">

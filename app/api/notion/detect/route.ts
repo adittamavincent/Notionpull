@@ -71,29 +71,90 @@ export async function GET(request: Request) {
 
     if (targetType === "database") {
       const database = await notionFetch<NotionDatabase>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, "database") });
-      let columns = Object.keys(database.properties ?? {});
+      let dataSource: any = null;
+      try {
+        dataSource = await notionFetch<any>(token, `/data_sources/${database.data_sources?.[0]?.id ?? database.id}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
+      } catch {
+        dataSource = database;
+      }
+
+      const hasSourceProps = dataSource?.properties && Object.keys(dataSource.properties).length > 0;
+      const properties = hasSourceProps ? dataSource.properties : (database.properties ?? {});
+      let columns = Object.keys(properties);
       let selectedColumns: string[] | undefined = undefined;
+      let columnDetails: Array<{ id?: string; name: string; visible?: boolean; width?: number }> = [];
+      let views: Array<{ id: string; title?: string; configuration?: any }> = [];
+
+      try {
+        const viewList = await notionFetch<any>(token, `/views?database_id=${encodeURIComponent(database.id)}`, {}, { tracePath: traceChild(traceRoot, "views") });
+        const viewIds = (viewList.results ?? []).map((view: any) => view.id).filter(Boolean);
+        views = await Promise.all(viewIds.map(async (id: string) => {
+          try {
+            const view = await notionFetch<any>(token, `/views/${id}`, {}, { tracePath: traceChild(traceRoot, `views/${id}`) });
+            const viewType = view.type;
+            const configuration = view.configuration ?? (viewType && view[viewType]?.configuration) ?? view.view?.configuration;
+            return {
+              id: view.id,
+              title: view.title ?? view.name ?? (viewType && view[viewType]?.title) ?? (viewType && view[viewType]?.name),
+              configuration
+            };
+          } catch {
+            return { id };
+          }
+        }));
+      } catch (err) {
+        console.error("Failed to list views:", err);
+      }
       
+      let activeView = null;
       if (viewId) {
+        activeView = views.find(v => v.id === viewId);
+      }
+      if (!activeView && views.length > 0) {
+        activeView = views[0];
+      }
+
+      if (activeView && activeView.configuration?.properties) {
         try {
-          const view = await notionFetch<any>(token, `/views/${viewId}`, {}, { tracePath: traceChild(traceRoot, "view") });
-          if (view.configuration?.properties) {
-            const propIdToName = Object.entries(database.properties ?? {}).reduce((acc: any, [name, prop]: [string, any]) => {
+          const configuration = activeView.configuration;
+          if (configuration?.properties) {
+            const propIdToName = Object.entries(properties).reduce((acc: any, [name, prop]: [string, any]) => {
               acc[prop.id] = name;
               return acc;
             }, {});
             
-            const viewProps = view.configuration.properties;
-            const viewPropNames = viewProps.map((p: any) => propIdToName[p.property_id]).filter(Boolean);
-            const viewVisibleNames = viewProps.filter((p: any) => p.visible !== false).map((p: any) => propIdToName[p.property_id]).filter(Boolean);
+            const viewProps = configuration.properties;
+            const resolvePropertyName = (entry: any): string | undefined => {
+              const propertyId = entry?.property_id ?? entry?.propertyId;
+              const propertyName = entry?.property_name ?? entry?.propertyName ?? entry?.name;
+
+              if (propertyId && propIdToName[propertyId]) return propIdToName[propertyId];
+              if (propertyName && properties[propertyName]) return propertyName;
+              if (propertyName) return propertyName;
+              return undefined;
+            };
+
+            columnDetails = viewProps.map((entry: any) => {
+              const name = resolvePropertyName(entry);
+              if (!name) return null;
+              return {
+                id: entry?.property_id ?? entry?.propertyId,
+                name,
+                visible: entry?.visible !== false,
+                width: typeof entry?.width === "number" ? entry.width : undefined,
+              };
+            }).filter(Boolean) as Array<{ id?: string; name: string; visible?: boolean; width?: number }>;
+
+            const viewPropNames = columnDetails.map((entry) => entry.name);
+            const viewVisibleNames = columnDetails.filter((entry) => entry.visible !== false).map((entry) => entry.name);
             
             const missing = columns.filter((c) => !viewPropNames.includes(c));
             
             columns = [...viewPropNames, ...missing];
-            selectedColumns = viewVisibleNames;
+            selectedColumns = viewVisibleNames.length > 0 ? viewVisibleNames : undefined;
           }
         } catch (err) {
-          console.error("Failed to fetch view:", err);
+          console.error("Failed to process view configuration:", err);
         }
       }
 
@@ -105,7 +166,10 @@ export async function GET(request: Request) {
         dataSourceName: database.data_sources?.[0]?.name,
         columns,
         selectedColumns,
-        properties: database.properties ?? {}
+        viewId: viewId ?? undefined,
+        views,
+        columnDetails,
+        properties
       });
     }
 
