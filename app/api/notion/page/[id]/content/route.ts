@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, tokenFromRequest } from "@/lib/notion";
 import type { NotionBlock } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -42,25 +42,53 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
 
           try {
             if (targetType === "child_database") {
-              const db = await notionFetch<any>(token, `/databases/${targetId}`);
-              const actualDbId = db.data_sources?.[0]?.id ?? targetId;
-              resolvedLinks.set(block.id, {
-                targetId: actualDbId,
-                targetType,
-                title: databaseTitle(db)
-              });
+              try {
+                const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                const actualDbId = db.data_sources?.[0]?.id ?? targetId;
+                resolvedLinks.set(block.id, {
+                  targetId: actualDbId,
+                  targetType: "child_database",
+                  title: databaseTitle(db)
+                });
+              } catch (dbErr: any) {
+                // If it's actually a page, fallback to fetching as page
+                if (dbErr instanceof NotionApiError && (dbErr.status === 404 || dbErr.status === 400 || /is a page/i.test(dbErr.message))) {
+                  const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                  resolvedLinks.set(block.id, {
+                    targetId,
+                    targetType: "child_page",
+                    title: pageTitle(pg)
+                  });
+                } else {
+                  throw dbErr;
+                }
+              }
             } else {
-              const pg = await notionFetch<any>(token, `/pages/${targetId}`);
-              resolvedLinks.set(block.id, {
-                targetId,
-                targetType,
-                title: pageTitle(pg)
-              });
+              try {
+                const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                resolvedLinks.set(block.id, {
+                  targetId,
+                  targetType: "child_page",
+                  title: pageTitle(pg)
+                });
+              } catch (pgErr: any) {
+                // If it's actually a database, fallback to fetching as database
+                if (pgErr instanceof NotionApiError && (pgErr.status === 404 || pgErr.status === 400 || /is a database/i.test(pgErr.message))) {
+                  const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                  resolvedLinks.set(block.id, {
+                    targetId: db.data_sources?.[0]?.id ?? targetId,
+                    targetType: "child_database",
+                    title: databaseTitle(db)
+                  });
+                } else {
+                  throw pgErr;
+                }
+              }
             }
           } catch {
             resolvedLinks.set(block.id, {
               targetId,
-              targetType,
+              targetType: targetType === "child_database" ? "child_database" : "child_page",
               title: targetType === "child_database" ? "Untitled database" : "Untitled page"
             });
           }

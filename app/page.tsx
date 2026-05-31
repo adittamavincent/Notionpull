@@ -6,6 +6,7 @@ import { DatabaseConfigModal } from "@/components/DatabaseConfigModal";
 import { ExportModal } from "@/components/ExportModal";
 import { ExportProgress } from "@/components/ExportProgress";
 import { TokenManager } from "@/components/TokenManager";
+import { DebugModal } from "@/components/DebugModal";
 import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
@@ -26,6 +27,7 @@ export default function Page() {
   const [tokens, setTokens] = useState<NotionTokenEntry[]>([]);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   
   const [url, setUrl] = useState("");
   const [urlHistory, setUrlHistory] = useState<HistoryItem[]>([]);
@@ -172,9 +174,15 @@ export default function Page() {
       const ids = extractNotionIds(url);
       if (!ids.length) throw new Error("Could not find a valid Notion ID in that URL.");
       
+      let viewId = "";
+      try {
+        const parsedUrl = new URL(url.trim());
+        viewId = parsedUrl.searchParams.get("v") || "";
+      } catch {}
+      
       // Try all IDs in parallel for faster detection
       const results = await Promise.allSettled(
-        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}`))
+        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`))
       );
       
       const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
@@ -231,7 +239,9 @@ export default function Page() {
         kind: object.type,
         depth: 0,
         dataSourceId: object.dataSourceId,
+        dataSourceName: object.dataSourceName,
         columns: object.columns,
+        selectedColumns: object.selectedColumns,
         properties: object.properties
       };
       const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
@@ -497,9 +507,14 @@ export default function Page() {
             <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
             <p className="text-xs font-medium text-zinc-500">{activeToken?.workspaceName ?? "No active workspace"}</p>
           </div>
-          <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setManagerOpen(true)}>
-            Tokens
-          </button>
+          <div className="flex gap-2">
+            <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
+              Debug
+            </button>
+            <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setManagerOpen(true)}>
+              Tokens
+            </button>
+          </div>
         </div>
       </header>
 
@@ -696,6 +711,8 @@ export default function Page() {
         titleById={titleMap} 
         onClose={() => setExportItems([])} 
       />
+
+      <DebugModal open={debugOpen} onClose={() => setDebugOpen(false)} />
     </main>
   );
 }
@@ -736,8 +753,8 @@ function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
   };
 }
 
-type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database" | "block"; title: string }> };
-type DatabaseResponse = { dataSourceId: string; title: string; columns?: string[]; properties?: Record<string, any> };
+type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database" | "block"; title: string; dataSourceName?: string }> };
+type DatabaseResponse = { dataSourceId: string; dataSourceName?: string; title: string; columns?: string[]; properties?: Record<string, any> };
 type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
   databases: Map<string, Promise<DatabaseResponse>>;
@@ -755,7 +772,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           title: child.title,
           kind: child.type as any,
           depth: node.depth + 1,
-          parentId: node.id
+          parentId: node.id,
+          dataSourceName: child.dataSourceName
         }));
       }
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
@@ -767,6 +785,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           // or we can use our unified database route which handles retrieval.
           const metadata = await memoDatabase(token, node.id, memo);
           node.dataSourceId = metadata.dataSourceId;
+          node.dataSourceName = metadata.dataSourceName ?? node.dataSourceName;
           node.columns = metadata.columns ?? node.columns;
           node.properties = metadata.properties ?? node.properties;
         } catch {

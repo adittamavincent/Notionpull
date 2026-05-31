@@ -5,6 +5,7 @@ export async function GET(request: Request) {
   try {
     const token = tokenFromRequest(request);
     const id = new URL(request.url).searchParams.get("id");
+    const viewId = new URL(request.url).searchParams.get("viewId");
     if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
     // Run probes in parallel for faster "detection"
@@ -19,12 +20,41 @@ export async function GET(request: Request) {
 
     if (dbRes.status === "fulfilled") {
       const database = dbRes.value;
+      let columns = Object.keys(database.properties ?? {});
+      let selectedColumns: string[] | undefined = undefined;
+      
+      if (viewId) {
+        try {
+          const view = await notionFetch<any>(token, `/views/${viewId}`);
+          if (view.configuration?.properties) {
+            const propIdToName = Object.entries(database.properties ?? {}).reduce((acc: any, [name, prop]: [string, any]) => {
+              acc[prop.id] = name;
+              return acc;
+            }, {});
+            
+            const viewProps = view.configuration.properties;
+            const viewPropNames = viewProps.map((p: any) => propIdToName[p.property_id]).filter(Boolean);
+            const viewVisibleNames = viewProps.filter((p: any) => p.visible !== false).map((p: any) => propIdToName[p.property_id]).filter(Boolean);
+            
+            const missing = columns.filter((c) => !viewPropNames.includes(c));
+            
+            columns = [...viewPropNames, ...missing];
+            selectedColumns = viewVisibleNames;
+          }
+        } catch (err) {
+          // Ignore view errors and fallback to default columns
+          console.error("Failed to fetch view:", err);
+        }
+      }
+
       return Response.json({
         type: "database",
         id: database.id,
         title: databaseTitle(database),
         dataSourceId: database.data_sources?.[0]?.id ?? database.id,
-        columns: Object.keys(database.properties ?? {}),
+        dataSourceName: database.data_sources?.[0]?.name,
+        columns,
+        selectedColumns,
         properties: database.properties ?? {}
       });
     }
@@ -36,6 +66,7 @@ export async function GET(request: Request) {
           id: dataSource.id,
           title: dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source",
           dataSourceId: dataSource.id,
+          dataSourceName: dataSource.name,
           columns: Object.keys(dataSource.properties ?? {}),
           properties: dataSource.properties ?? {}
         });
@@ -59,6 +90,7 @@ export async function GET(request: Request) {
                 id: actualDbId,
                 title: databaseTitle(db),
                 dataSourceId: actualDbId,
+                dataSourceName: db.data_sources?.[0]?.name,
                 columns: Object.keys(db.properties ?? {}),
                 properties: db.properties ?? {}
               });

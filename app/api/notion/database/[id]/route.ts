@@ -27,6 +27,7 @@ export async function GET(request: Request, { params }: Params) {
     }
 
     const dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
+    const dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
     
     // If it's a data source, we already have it. If it's a database, we want the source props specifically.
     // We catch any fetch errors and fall back to the container database itself.
@@ -48,6 +49,7 @@ export async function GET(request: Request, { params }: Params) {
       id: database.id,
       title: isDataSource ? (database.name ?? "Untitled data source") : databaseTitle(database),
       dataSourceId,
+      dataSourceName,
       columns: Object.keys(properties),
       properties
     });

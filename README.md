@@ -5,11 +5,13 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 ## Features
 
 - **Finder-like Navigation:** Expandable list view for browsing nested Notion structures with intuitive icons.
-- **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview.
+- **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview. Database views are automatically detected from URLs to perfectly respect your configured property ordering and visibility.
 - **Simple Table Support:** Seamlessly detects, displays, and formats standard Notion simple tables into pristine Markdown tables, including granular selection of individual rows.
 - **Smart Caching:** Local memory caching ensures that returning to a previously fetched depth level is instant. 
 - **Recent URLs:** Quick access to recently fetched Notion URLs.
 - **Export Progress:** Visual "building block" animation while fetching export data.
+- **Color-Coded API Log Tracking:** raw API tracking debug modal classifies and dynamically applies harmonized premium colors (Blue for Databases, Purple for Data Sources, Emerald for Pages, etc.) directly to the log nameTags, showcasing synced data source context (e.g. Jira, GitHub connection status) transparently.
+- **Resilient Type Validation:** Resilient to database vs. page type mismatches (such as mismatched type properties in `link_to_page` blocks), dynamically recovering target schema attributes on validation limits without raising 404/400 errors.
 
 ## Run
 
@@ -28,6 +30,7 @@ Open `http://localhost:3000`.
 - Notion API version is `2026-03-11`.
 - Database rows use `POST /v1/databases/{id}/query` (full property data), falling back to `POST /v1/data_sources/{id}/query` for non-database data sources. The `data_sources` query endpoint returns sparse rows where URL, Files, and rich_text properties may appear empty even when they contain data.
 - Notion ID parser extracts both 32-character compact IDs and 36-character standard UUIDs from any shared URL, preserving hyphen boundaries and safely ignoring preceding slugs.
+- URL parsing automatically extracts view IDs (`?v=...`) and uses the Views API to perfectly mirror property order and column visibility defined in Notion database views.
 - Column definitions for empty databases (databases with zero rows/entries) are correctly resolved by falling back to the static database schema (`database.properties`) instead of returning empty properties.
 - Database exports correctly include the full column list and structural schema metadata (including column names, types, options, and descriptions) even for empty databases with zero rows/entries.
 - Block-level URL detection allows directly pasting block-level links (like table blocks) into the query input to fetch, traverse, and export their child elements.
@@ -35,3 +38,6 @@ Open `http://localhost:3000`.
 - Linked databases and linked pages (`link_to_page` blocks) are seamlessly detected, fetched, and fully supported, resolving to their target configurations during navigation and markdown export.
 - Database row page-content export: when a row inside a database has selected child blocks (grey block icons in the tree), the row's full page content is exported in addition to its table properties. Leaf rows with no selected children are rendered only as table rows.
 - Column layout blocks (`column_list`, `column`) are fully supported in exports — each column's content is rendered sequentially in plain text.
+- **Escape Key & Dismiss Shortcuts:** Token Manager dialog fully supports dismissing instantly via the `Escape` key shortcut or by clicking outside the modal overlay.
+- **Autofill-Resistant Token Inputs:** Token entry inputs are implemented with secure `type="text"` fields styled with visual character masking (`-webkit-text-security: disc`) to prevent password managers and browser credentials auto-fill, while offering a premium Eye-toggle button to show/hide the token.
+- **Reliable Fast Refresh / Dev Mode:** Local development mode is optimized to clear stale compilation cache in `.next` directories on startup, and React Strict Mode is disabled to avoid double HMR compiled instances and eradicate static asset `404` errors during hot reload.

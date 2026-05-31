@@ -285,8 +285,8 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
     );
   }
 
-  if (!nodes.length) {
-    return <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">No content fetched.</div>;
+  if (!nodes.length || visibleFlat.length === 0) {
+    return null;
   }
 
   if (visibleFlat.length <= 100) {

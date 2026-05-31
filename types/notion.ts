@@ -11,7 +11,9 @@ export type DetectedObject = {
   id: string;
   title: string;
   dataSourceId?: string;
+  dataSourceName?: string;
   columns?: string[];
+  selectedColumns?: string[];
   properties?: Record<string, any>;
 };
 
@@ -24,6 +26,7 @@ export type TreeNodeData = {
   depth: number;
   parentId?: string;
   dataSourceId?: string;
+  dataSourceName?: string;
   page?: NotionPage;
   children?: TreeNodeData[];
   error?: string;
