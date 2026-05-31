@@ -1,11 +1,34 @@
 import { useEffect, useState } from "react";
-import { X, Activity, RefreshCw, Trash2, ChevronRight, ChevronDown, TerminalSquare } from "lucide-react";
+import { X, Activity, RefreshCw, Trash2, ChevronRight, ChevronDown, TerminalSquare, Copy, Check } from "lucide-react";
 import type { LogEntry } from "@/lib/logger";
 
 export function DebugModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySurfaceLogs = async () => {
+    if (logs.length === 0) return;
+    
+    const text = logs.map(log => {
+      const time = new Date(log.timestamp).toISOString().split('T')[1].replace('Z', '');
+      const cleanUrl = log.url.replace('https://api.notion.com/v1', '');
+      const nameInfo = log.nameTag 
+        ? `"${log.nameTag}"${log.objectType ? ` (${log.objectType})` : ''}` 
+        : (log.objectType ? `(${log.objectType})` : '');
+      
+      return `[${time}] ${log.method.padEnd(4)} ${log.status} - ${nameInfo ? nameInfo + ' - ' : ''}${cleanUrl} (${log.duration}ms)`;
+    }).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy surface logs", err);
+    }
+  };
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -58,6 +81,25 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {logs.length > 0 && (
+              <button 
+                onClick={handleCopySurfaceLogs}
+                className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 active:bg-zinc-200 transition-all shadow-sm"
+                title="Copy all surface-level logs to clipboard"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-4 w-4 text-emerald-600" />
+                    <span className="text-emerald-700">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 text-zinc-500" />
+                    <span>Copy Logs</span>
+                  </>
+                )}
+              </button>
+            )}
             <button 
               onClick={fetchLogs}
               className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors"
