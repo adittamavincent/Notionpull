@@ -205,22 +205,57 @@ function LogPill({ children, tone, className = "" }: { children: string; tone: s
   );
 }
 
+function formatDetailedLog(log: LogEntry) {
+  const lines = [
+    `Time: ${formatClock(log.timestamp)}`,
+    `Method: ${log.method}`,
+    `Status: ${log.status}`,
+    `Duration: ${log.duration}ms`,
+    `URL: ${log.url}`,
+  ];
+
+  if (log.tracePath) lines.push(`Trace: ${log.tracePath}`);
+  if (log.nameTag) lines.push(`Label: ${log.nameTag}`);
+  if (log.objectType) lines.push(`Type: ${log.objectType}`);
+
+  if (log.requestHeaders && Object.keys(log.requestHeaders).length > 0) {
+    lines.push("", "Request Headers:", JSON.stringify(log.requestHeaders, null, 2));
+  }
+  if (log.requestBody !== undefined) {
+    lines.push("", "Request Body:", JSON.stringify(log.requestBody, null, 2));
+  }
+  if (log.responseBody !== undefined) {
+    lines.push("", "Response Body:", JSON.stringify(log.responseBody, null, 2));
+  }
+  if (log.error) {
+    lines.push("", `Error: ${log.error}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatErrorLogs(logs: LogEntry[]) {
+  return logs
+    .filter((log) => log.status >= 400 || Boolean(log.error))
+    .map((log) => [
+      "=== ERROR ===",
+      formatDetailedLog(log),
+    ].join("\n"))
+    .join("\n\n");
+}
+
 function TreeBranch({
   node,
   collapsedIds,
   expandedId,
   onToggleCollapsed,
   onToggleExpanded,
-  copiedDetailId,
-  onCopyDetailedLog,
 }: {
   node: TreeLogNode;
   collapsedIds: Set<string>;
   expandedId: string | null;
   onToggleCollapsed: (id: string) => void;
   onToggleExpanded: (id: string) => void;
-  copiedDetailId: string | null;
-  onCopyDetailedLog: (log: LogEntry) => void;
 }) {
   const isCollapsed = collapsedIds.has(node.key);
   const isExpanded = node.log ? expandedId === node.log.id : false;
@@ -288,28 +323,6 @@ function TreeBranch({
 
           {isExpanded && (
             <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-xs uppercase tracking-wider text-zinc-500">
-                  {isError ? "Error details" : "Request details"}
-                </div>
-                <button
-                  type="button"
-                    onClick={() => onCopyDetailedLog(node.log!)}
-                  className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
-                >
-                    {copiedDetailId === node.log!.id ? (
-                    <>
-                      <Check className="h-3.5 w-3.5 text-emerald-400" />
-                      Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3.5 w-3.5 text-zinc-400" />
-                      {isError ? "Copy Error" : "Copy Details"}
-                    </>
-                  )}
-                </button>
-              </div>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div>
                   <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
@@ -370,8 +383,6 @@ function TreeBranch({
               expandedId={expandedId}
               onToggleCollapsed={onToggleCollapsed}
               onToggleExpanded={onToggleExpanded}
-              copiedDetailId={copiedDetailId}
-              onCopyDetailedLog={onCopyDetailedLog}
             />
           ))}
         </div>
@@ -387,7 +398,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [viewMode, setViewMode] = useState<DebugViewMode>("chronological");
   const [collapsedTreeIds, setCollapsedTreeIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
-  const [copiedDetailId, setCopiedDetailId] = useState<string | null>(null);
+  const [copiedErrors, setCopiedErrors] = useState(false);
   const clearedAtRef = useRef(0);
 
   const treeRoots = useMemo(() => buildTree(logs), [logs]);
@@ -415,44 +426,6 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     setExpandedId((current) => (current === id ? null : id));
   };
 
-  const formatDetailedLog = (log: LogEntry) => {
-    const lines = [
-      `Time: ${formatClock(log.timestamp)}`,
-      `Method: ${log.method}`,
-      `Status: ${log.status}`,
-      `Duration: ${log.duration}ms`,
-      `URL: ${log.url}`,
-    ];
-
-    if (log.tracePath) lines.push(`Trace: ${log.tracePath}`);
-    if (log.nameTag) lines.push(`Label: ${log.nameTag}`);
-    if (log.objectType) lines.push(`Type: ${log.objectType}`);
-    if (log.requestHeaders && Object.keys(log.requestHeaders).length > 0) {
-      lines.push("", "Request Headers:", JSON.stringify(log.requestHeaders, null, 2));
-    }
-    if (log.requestBody !== undefined) {
-      lines.push("", "Request Body:", JSON.stringify(log.requestBody, null, 2));
-    }
-    if (log.responseBody !== undefined) {
-      lines.push("", "Response Body:", JSON.stringify(log.responseBody, null, 2));
-    }
-    if (log.error) {
-      lines.push("", `Error: ${log.error}`);
-    }
-
-    return lines.join("\n");
-  };
-
-  const handleCopyDetailedLog = async (log: LogEntry) => {
-    try {
-      await navigator.clipboard.writeText(formatDetailedLog(log));
-      setCopiedDetailId(log.id);
-      setTimeout(() => setCopiedDetailId((current) => (current === log.id ? null : current)), 2000);
-    } catch (err) {
-      console.error("Failed to copy detailed log", err);
-    }
-  };
-
   const handleCopySurfaceLogs = async () => {
     if (logs.length === 0) return;
     
@@ -472,6 +445,19 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy surface logs", err);
+    }
+  };
+
+  const handleCopyErrors = async () => {
+    const errorText = formatErrorLogs(logs);
+    if (!errorText) return;
+
+    try {
+      await navigator.clipboard.writeText(errorText);
+      setCopiedErrors(true);
+      setTimeout(() => setCopiedErrors(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy error logs", err);
     }
   };
 
@@ -553,23 +539,42 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
           </div>
           <div className="flex items-center gap-3">
             {logs.length > 0 && (
-              <button 
-                onClick={handleCopySurfaceLogs}
-                className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 active:bg-zinc-200 transition-all shadow-sm"
-                title="Copy all surface-level logs to clipboard"
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-4 w-4 text-emerald-600" />
-                    <span className="text-emerald-700">Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4 text-zinc-500" />
-                    <span>Copy Logs</span>
-                  </>
-                )}
-              </button>
+              <>
+                <button 
+                  onClick={handleCopySurfaceLogs}
+                  className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 active:bg-zinc-200 transition-all shadow-sm"
+                  title="Copy all surface-level logs to clipboard"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 text-emerald-600" />
+                      <span className="text-emerald-700">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 text-zinc-500" />
+                      <span>Copy Logs</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={handleCopyErrors}
+                  className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 active:bg-red-200 transition-all shadow-sm"
+                  title="Copy only error logs with detailed request and response data"
+                >
+                  {copiedErrors ? (
+                    <>
+                      <Check className="h-4 w-4 text-emerald-600" />
+                      <span className="text-emerald-700">Copied errors!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 text-red-500" />
+                      <span>Copy Errors</span>
+                    </>
+                  )}
+                </button>
+              </>
             )}
             <button 
               onClick={fetchLogs}
@@ -710,28 +715,6 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
 
                     {isExpanded && (
                       <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <div className="text-xs uppercase tracking-wider text-zinc-500">
-                            {isError ? "Error details" : "Request details"}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleCopyDetailedLog(log)}
-                            className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
-                          >
-                            {copiedDetailId === log.id ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-emerald-400" />
-                                Copied
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5 text-zinc-400" />
-                                {isError ? "Copy Error" : "Copy Details"}
-                              </>
-                            )}
-                          </button>
-                        </div>
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                           <div>
                             <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
@@ -776,8 +759,6 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                   expandedId={expandedId}
                   onToggleCollapsed={toggleCollapsedTreeId}
                   onToggleExpanded={toggleExpandedLog}
-                  copiedDetailId={copiedDetailId}
-                  onCopyDetailedLog={handleCopyDetailedLog}
                 />
               ))}
             </div>
