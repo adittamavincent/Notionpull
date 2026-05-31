@@ -1,4 +1,4 @@
-import { databaseTitle, NotionApiError, notionErrorResponse, notionFetch, tokenFromRequest } from "@/lib/notion";
+import { databaseTitle, NotionApiError, notionErrorResponse, notionFetch, traceChild, tokenFromRequest } from "@/lib/notion";
 import type { NotionDatabase } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -7,6 +7,7 @@ export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
     const kind = new URL(request.url).searchParams.get("kind");
+    const traceRoot = `database/${params.id}`;
     
     const preferDataSource = kind === "data_source";
     const preferred = preferDataSource ? `/data_sources/${params.id}` : `/databases/${params.id}`;
@@ -15,12 +16,12 @@ export async function GET(request: Request, { params }: Params) {
     let database: any;
     let isDataSource = false;
     try {
-      database = await notionFetch<any>(token, preferred);
+      database = await notionFetch<any>(token, preferred, {}, { tracePath: traceChild(traceRoot, preferDataSource ? "data-source" : "database") });
       isDataSource = preferDataSource;
     } catch (err: any) {
       if (err instanceof NotionApiError && (err.status === 404 || err.status === 400)) {
         try {
-          database = await notionFetch<any>(token, fallback);
+          database = await notionFetch<any>(token, fallback, {}, { tracePath: traceChild(traceRoot, "fallback") });
           isDataSource = fallback.includes("/data_sources/");
         } catch {
           throw err;
@@ -38,7 +39,7 @@ export async function GET(request: Request, { params }: Params) {
     let dataSource: any = null;
     if (!isDataSource) {
       try {
-        dataSource = await notionFetch<any>(token, `/data_sources/${dataSourceId}`);
+        dataSource = await notionFetch<any>(token, `/data_sources/${dataSourceId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
       } catch {
         dataSource = database;
       }

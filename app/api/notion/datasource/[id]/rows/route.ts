@@ -1,4 +1,4 @@
-import { databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, tokenFromRequest } from "@/lib/notion";
+import { databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, traceChild, tokenFromRequest } from "@/lib/notion";
 import type { NotionDatabase, NotionPage } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -8,6 +8,7 @@ export async function GET(request: Request, { params }: Params) {
     const token = tokenFromRequest(request);
     const cursor = new URL(request.url).searchParams.get("cursor");
     const kind = new URL(request.url).searchParams.get("kind");
+    const traceRoot = `datasource/${params.id}`;
     const body: Record<string, unknown> = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
     let rows: any;
@@ -16,11 +17,11 @@ export async function GET(request: Request, { params }: Params) {
       rows = await notionFetch<any>(token, `/data_sources/${dataSourceId}/query`, {
         method: "POST",
         body: JSON.stringify(body)
-      });
+      }, { tracePath: traceChild(traceRoot, "query") });
     } catch (err: any) {
       throw err;
     }
-    rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? []));
+    rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? [], traceChild(traceRoot, "relations")), traceChild(traceRoot, "titles"));
     return Response.json(rows);
   } catch (error) {
     return notionErrorResponse(error);
@@ -31,18 +32,18 @@ async function resolveDataSourceId(token: string, id: string, kind: string | nul
   if (kind === "data_source") return id;
 
   try {
-    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
+    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/database") });
     return database.data_sources?.[0]?.id ?? id;
   } catch (error) {
     if (error instanceof NotionApiError && (error.status === 404 || error.status === 400)) {
-      const dataSource: any = await notionFetch(token, `/data_sources/${id}`);
+      const dataSource: any = await notionFetch(token, `/data_sources/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/data-source") });
       return dataSource.id;
     }
     throw error;
   }
 }
 
-async function expandRelationProperties(token: string, rows: NotionPage[]): Promise<NotionPage[]> {
+async function expandRelationProperties(token: string, rows: NotionPage[], traceRoot: string): Promise<NotionPage[]> {
   await Promise.all(rows.map(async (row) => {
     const entries = Object.entries(row.properties ?? {}).filter(([, prop]: [string, any]) => (
       prop?.type === "relation" && prop?.has_more && prop?.id
@@ -51,7 +52,7 @@ async function expandRelationProperties(token: string, rows: NotionPage[]): Prom
     await Promise.all(entries.map(async ([name, prop]: [string, any]) => {
       row.properties![name] = {
         ...prop,
-        relation: await fetchFullRelation(token, row.id, prop.id),
+        relation: await fetchFullRelation(token, row.id, prop.id, traceChild(traceRoot, `row/${row.id}/property/${prop.id}`)),
         has_more: false
       };
     }));
@@ -60,14 +61,14 @@ async function expandRelationProperties(token: string, rows: NotionPage[]): Prom
   return rows;
 }
 
-async function fetchFullRelation(token: string, pageId: string, propertyId: string): Promise<Array<{ id: string; title?: string }>> {
+async function fetchFullRelation(token: string, pageId: string, propertyId: string, traceRoot: string): Promise<Array<{ id: string; title?: string }>> {
   const relation: Array<{ id: string; title?: string }> = [];
   let cursor: string | null = null;
 
   do {
     const qs = new URLSearchParams({ page_size: "100" });
     if (cursor) qs.set("start_cursor", cursor);
-    const body: any = await notionFetch(token, `/pages/${pageId}/properties/${encodedPropertyId(propertyId)}?${qs.toString()}`);
+    const body: any = await notionFetch(token, `/pages/${pageId}/properties/${encodedPropertyId(propertyId)}?${qs.toString()}`, {}, { tracePath: traceChild(traceRoot, "relation-page") });
     relation.push(...(body.results ?? [])
       .filter((item: any) => item?.type === "relation" && item.relation?.id)
       .map((item: any) => ({ id: item.relation.id })));
@@ -85,7 +86,7 @@ function encodedPropertyId(id: string): string {
   }
 }
 
-async function hydrateRelationTitles(token: string, rows: NotionPage[]): Promise<NotionPage[]> {
+async function hydrateRelationTitles(token: string, rows: NotionPage[], traceRoot: string): Promise<NotionPage[]> {
   const relationIds = new Set<string>();
 
   for (const row of rows) {
@@ -94,7 +95,7 @@ async function hydrateRelationTitles(token: string, rows: NotionPage[]): Promise
 
   const titles = new Map<string, string>();
   await Promise.all(Array.from(relationIds).map(async (id) => {
-    const title = await fetchObjectTitle(token, id);
+    const title = await fetchObjectTitle(token, id, traceChild(traceRoot, `title/${id}`));
     if (title) titles.set(id, title);
   }));
 
@@ -130,23 +131,23 @@ function applyRelationTitles(value: any, titles: Map<string, string>) {
   }
 }
 
-async function fetchObjectTitle(token: string, id: string): Promise<string> {
+async function fetchObjectTitle(token: string, id: string, traceRoot: string): Promise<string> {
   try {
-    const page = await notionFetch<NotionPage>(token, `/pages/${id}`);
+    const page = await notionFetch<NotionPage>(token, `/pages/${id}`, {}, { tracePath: traceChild(traceRoot, "page") });
     return pageTitle(page);
   } catch (error) {
     if (!isProbeMiss(error)) return "";
   }
 
   try {
-    const dataSource: any = await notionFetch(token, `/data_sources/${id}`);
+    const dataSource: any = await notionFetch(token, `/data_sources/${id}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
     return dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source";
   } catch (error) {
     if (!isProbeMiss(error)) return "";
   }
 
   try {
-    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`);
+    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`, {}, { tracePath: traceChild(traceRoot, "database") });
     return databaseTitle(database);
   } catch {
     return "";

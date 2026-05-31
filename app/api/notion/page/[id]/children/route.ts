@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, traceChild, tokenFromRequest } from "@/lib/notion";
 
 type Params = { params: { id: string } };
 
@@ -10,7 +10,7 @@ export async function GET(request: Request, { params }: Params) {
     do {
       const qs = new URLSearchParams({ page_size: "100" });
       if (start_cursor) qs.set("start_cursor", start_cursor);
-      const body: any = await notionFetch(token, `/blocks/${params.id}/children?${qs.toString()}`);
+      const body: any = await notionFetch(token, `/blocks/${params.id}/children?${qs.toString()}`, {}, { tracePath: traceChild(`page-children/${params.id}`, "children") });
       blocks.push(...body.results);
       start_cursor = body.has_more ? body.next_cursor : undefined;
     } while (start_cursor);
@@ -32,7 +32,7 @@ export async function GET(request: Request, { params }: Params) {
           try {
             if (targetType === "database") {
               try {
-                const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-database/${targetId}`) });
                 const actualDbId = db.data_sources?.[0]?.id ?? targetId;
                 resolvedLinks.set(block.id, {
                   targetId: actualDbId,
@@ -43,7 +43,7 @@ export async function GET(request: Request, { params }: Params) {
               } catch (dbErr: any) {
                 // If it's actually a page, fallback to fetching as page
                 if (dbErr instanceof NotionApiError && (dbErr.status === 404 || dbErr.status === 400 || /is a page/i.test(dbErr.message))) {
-                  const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                  const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
                   resolvedLinks.set(block.id, {
                     targetId,
                     targetType: "page",
@@ -55,7 +55,7 @@ export async function GET(request: Request, { params }: Params) {
               }
             } else {
               try {
-                const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
                 resolvedLinks.set(block.id, {
                   targetId,
                   targetType: "page",
@@ -64,7 +64,7 @@ export async function GET(request: Request, { params }: Params) {
               } catch (pgErr: any) {
                 // If it's actually a database, fallback to fetching as database
                 if (pgErr instanceof NotionApiError && (pgErr.status === 404 || pgErr.status === 400 || /is a database/i.test(pgErr.message))) {
-                  const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                  const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-database/${targetId}`) });
                   resolvedLinks.set(block.id, {
                     targetId: db.data_sources?.[0]?.id ?? targetId,
                     targetType: "database",

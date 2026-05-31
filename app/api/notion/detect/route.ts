@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, traceChild, tokenFromRequest } from "@/lib/notion";
 import type { NotionDatabase, NotionPage } from "@/types/notion";
 
 export async function GET(request: Request) {
@@ -7,6 +7,7 @@ export async function GET(request: Request) {
     const id = new URL(request.url).searchParams.get("id");
     const viewId = new URL(request.url).searchParams.get("viewId");
     if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
+    const traceRoot = `detect/${id}`;
 
     // Use a smarter sequential algorithm to avoid 404/400 logs
     let targetId = id;
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     try {
       // 1. Fetch as block first. This works for pages, databases, and blocks
       // without throwing 400/404 errors for type mismatches.
-      blockData = await notionFetch<any>(token, `/blocks/${targetId}`);
+      blockData = await notionFetch<any>(token, `/blocks/${targetId}`, {}, { tracePath: traceChild(traceRoot, "block") });
       if (blockData.type === "child_database") {
         targetType = "database";
       } else if (blockData.type === "child_page") {
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
 
     if (!targetType) {
       try {
-        const ds = await notionFetch<any>(token, `/data_sources/${targetId}`);
+        const ds = await notionFetch<any>(token, `/data_sources/${targetId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
         return Response.json({
           type: "data_source",
           id: ds.id,
@@ -69,13 +70,13 @@ export async function GET(request: Request) {
     }
 
     if (targetType === "database") {
-      const database = await notionFetch<NotionDatabase>(token, `/databases/${targetId}`);
+      const database = await notionFetch<NotionDatabase>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, "database") });
       let columns = Object.keys(database.properties ?? {});
       let selectedColumns: string[] | undefined = undefined;
       
       if (viewId) {
         try {
-          const view = await notionFetch<any>(token, `/views/${viewId}`);
+          const view = await notionFetch<any>(token, `/views/${viewId}`, {}, { tracePath: traceChild(traceRoot, "view") });
           if (view.configuration?.properties) {
             const propIdToName = Object.entries(database.properties ?? {}).reduce((acc: any, [name, prop]: [string, any]) => {
               acc[prop.id] = name;
@@ -109,7 +110,7 @@ export async function GET(request: Request) {
     }
 
     if (targetType === "page") {
-      const page = await notionFetch<NotionPage>(token, `/pages/${targetId}`);
+      const page = await notionFetch<NotionPage>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(traceRoot, "page") });
       return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
     }
 

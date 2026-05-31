@@ -4,6 +4,7 @@ export type LogEntry = {
   duration: number;
   method: string;
   url: string;
+  tracePath?: string;
   nameTag?: string;
   objectType?: string;
   requestHeaders?: Record<string, string>;

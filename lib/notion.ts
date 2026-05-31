@@ -12,6 +12,14 @@ export class NotionApiError extends Error {
   }
 }
 
+export type DebugTrace = {
+  tracePath?: string;
+};
+
+export function traceChild(base: string | undefined, segment: string): string {
+  return base ? `${base}/${segment}` : segment;
+}
+
 export function formatNotionId(input: string): string {
   const id = extractNotionIds(input)[0];
   if (!id) throw new Error("Could not find a valid Notion ID in that URL.");
@@ -182,30 +190,33 @@ import { addLog } from "./logger";
 export async function notionFetch<T>(
   token: string,
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  trace?: DebugTrace
 ): Promise<T> {
   const url = `${NOTION_API_BASE}${path}`;
   const method = init.method ?? "GET";
   const start = Date.now();
-  
-  let requestBody: any;
-  if (typeof init.body === "string") {
-    try {
-      requestBody = JSON.parse(init.body);
-    } catch {
-      requestBody = init.body;
-    }
-  }
+  const requestBody = typeof init.body === "string"
+    ? (() => {
+        try {
+          return JSON.parse(init.body);
+        } catch {
+          return init.body;
+        }
+      })()
+    : undefined;
 
   const logEntry: any = {
     id: Math.random().toString(36).substring(2, 9),
     timestamp: start,
     method,
     url,
+    tracePath: trace?.tracePath,
     requestHeaders: {
       "Notion-Version": NOTION_VERSION,
       "Content-Type": "application/json",
-      ...(init.headers as any ?? {})
+      ...(trace?.tracePath ? { "X-Debug-Trace-Path": trace.tracePath } : {}),
+      ...(init.headers as any ?? {}),
     },
     requestBody,
   };
@@ -219,21 +230,20 @@ export async function notionFetch<T>(
         Authorization: `Bearer ${token}`,
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
-        ...(init.headers ?? {})
+        ...(init.headers ?? {}),
       },
-      cache: "no-store"
+      cache: "no-store",
     });
 
     logEntry.duration = Date.now() - start;
     logEntry.status = response.status;
 
-    let responseBodyText = await response.text();
+    const responseBodyText = await response.text();
     let responseBodyJson: any;
     try {
       responseBodyJson = JSON.parse(responseBodyText);
       logEntry.responseBody = responseBodyJson;
-      
-      // Attempt to extract a human readable name tag
+
       let nameTag = "";
       let objectType = "";
       if (responseBodyJson.object === "database") {
@@ -259,9 +269,10 @@ export async function notionFetch<T>(
         if (path.includes("/data_sources")) {
           objectType = "data_source";
         }
-      } else if (responseBodyJson.title && typeof responseBodyJson.title === 'string') {
+      } else if (responseBodyJson.title && typeof responseBodyJson.title === "string") {
         nameTag = responseBodyJson.title;
       }
+
       if (nameTag) logEntry.nameTag = nameTag;
       if (objectType) logEntry.objectType = objectType;
     } catch {

@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, traceChild, tokenFromRequest } from "@/lib/notion";
 import type { NotionBlock } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -10,21 +10,21 @@ export async function GET(request: Request, { params }: Params) {
     const depthParam = searchParams.get("depth");
     const maxDepth = depthParam === "All" || !depthParam ? 20 : Number(depthParam);
 
-    const blocks = await getChildren(token, params.id, 0, maxDepth);
+    const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`);
     return Response.json({ results: blocks });
   } catch (error) {
     return notionErrorResponse(error);
   }
 }
 
-async function getChildren(token: string, blockId: string, depth: number, maxDepth: number): Promise<NotionBlock[]> {
+async function getChildren(token: string, blockId: string, depth: number, maxDepth: number, traceRoot: string): Promise<NotionBlock[]> {
   if (depth >= maxDepth) return [];
   const blocks: NotionBlock[] = [];
   let start_cursor: string | undefined;
   do {
     const qs = new URLSearchParams({ page_size: "100" });
     if (start_cursor) qs.set("start_cursor", start_cursor);
-    const body: any = await notionFetch(token, `/blocks/${blockId}/children?${qs.toString()}`);
+    const body: any = await notionFetch(token, `/blocks/${blockId}/children?${qs.toString()}`, {}, { tracePath: traceChild(traceRoot, "children") });
 
     // Resolve link_to_page blocks in parallel
     const linkToPageBlocks = body.results.filter((block: any) => block.type === "link_to_page");
@@ -43,7 +43,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
           try {
             if (targetType === "child_database") {
               try {
-                const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, `link-database/${targetId}`) });
                 const actualDbId = db.data_sources?.[0]?.id ?? targetId;
                 resolvedLinks.set(block.id, {
                   targetId: actualDbId,
@@ -53,7 +53,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
               } catch (dbErr: any) {
                 // If it's actually a page, fallback to fetching as page
                 if (dbErr instanceof NotionApiError && (dbErr.status === 404 || dbErr.status === 400 || /is a page/i.test(dbErr.message))) {
-                  const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                  const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(traceRoot, `link-page/${targetId}`) });
                   resolvedLinks.set(block.id, {
                     targetId,
                     targetType: "child_page",
@@ -65,7 +65,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
               }
             } else {
               try {
-                const pg = await notionFetch<any>(token, `/pages/${targetId}`);
+                const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(traceRoot, `link-page/${targetId}`) });
                 resolvedLinks.set(block.id, {
                   targetId,
                   targetType: "child_page",
@@ -74,7 +74,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
               } catch (pgErr: any) {
                 // If it's actually a database, fallback to fetching as database
                 if (pgErr instanceof NotionApiError && (pgErr.status === 404 || pgErr.status === 400 || /is a database/i.test(pgErr.message))) {
-                  const db = await notionFetch<any>(token, `/databases/${targetId}`);
+                  const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, `link-database/${targetId}`) });
                   resolvedLinks.set(block.id, {
                     targetId: db.data_sources?.[0]?.id ?? targetId,
                     targetType: "child_database",
@@ -138,7 +138,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
       }
 
       if (block.has_children && (depth + 1 < maxDepth)) {
-        block.children = await getChildren(token, block.id, depth + 1, maxDepth);
+        block.children = await getChildren(token, block.id, depth + 1, maxDepth, traceChild(traceRoot, `child/${block.id}`));
       }
       
       // Filter out truly empty blocks
