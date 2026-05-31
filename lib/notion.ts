@@ -94,7 +94,10 @@ export function propertyValue(prop: any, options: PropertyValueOptions = {}): st
     case "files":
       return prop.files?.map((file: any) => file.name).join(", ") ?? "";
     case "relation":
-      return prop.relation?.map((rel: any) => rel.title ?? titleForId(rel.id, options)).filter(Boolean).join(", ") ?? "";
+      return prop.relation?.map((rel: any) => {
+        const title = rel.title ?? titleForId(rel.id, options);
+        return title ? `${title} (${rel.id})` : rel.id;
+      }).filter(Boolean).join(", ") ?? "";
     case "rollup":
       return rollupValue(prop.rollup, options);
     case "formula":
