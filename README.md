@@ -11,6 +11,7 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 - **Recent URLs:** Quick access to recently fetched Notion URLs.
 - **Export Progress:** Visual "building block" animation while fetching export data.
 - **Color-Coded API Log Tracking:** raw API tracking debug modal classifies and dynamically applies harmonized premium colors (Blue for Databases, Purple for Data Sources, Emerald for Pages, etc.) directly to the log nameTags, showcasing synced data source context (e.g. Jira, GitHub connection status) transparently. Includes a premium one-click **Copy Logs** utility to instantly format and copy all surface-level API tracking logs to the clipboard.
+- **Smart Targeted Detection:** Drastically reduces log noise and prevents unnecessary API requests (eliminating concurrent 404/400 errors) by using the universal `/blocks` endpoint as an initial type-discovery probe, falling back to sequential resolving or parsing granular Notion 400 error messages when needed.
 - **Resilient Type Validation:** Resilient to database vs. page type mismatches (such as mismatched type properties in `link_to_page` blocks), dynamically recovering target schema attributes on validation limits without raising 404/400 errors.
 
 ## Run

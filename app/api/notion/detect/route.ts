@@ -8,18 +8,68 @@ export async function GET(request: Request) {
     const viewId = new URL(request.url).searchParams.get("viewId");
     if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
-    // Run probes in parallel for faster "detection"
-    const results = await Promise.allSettled([
-      notionFetch<NotionDatabase>(token, `/databases/${id}`),
-      notionFetch<any>(token, `/data_sources/${id}`),
-      notionFetch<NotionPage>(token, `/pages/${id}`),
-      notionFetch<any>(token, `/blocks/${id}`)
-    ]);
+    // Use a smarter sequential algorithm to avoid 404/400 logs
+    let targetId = id;
+    let targetType: "database" | "page" | "data_source" | "block" | null = null;
+    let blockData: any = null;
 
-    const [dbRes, dsRes, pageRes, blockRes] = results;
+    try {
+      // 1. Fetch as block first. This works for pages, databases, and blocks
+      // without throwing 400/404 errors for type mismatches.
+      blockData = await notionFetch<any>(token, `/blocks/${targetId}`);
+      if (blockData.type === "child_database") {
+        targetType = "database";
+      } else if (blockData.type === "child_page") {
+        targetType = "page";
+      } else if (blockData.type === "link_to_page" && blockData.link_to_page) {
+        const link = blockData.link_to_page;
+        if (link.type === "database_id" && link.database_id) {
+          targetType = "database";
+          targetId = link.database_id;
+        } else if (link.type === "page_id" && link.page_id) {
+          targetType = "page";
+          targetId = link.page_id;
+        } else {
+          targetType = "block";
+        }
+      } else {
+        targetType = "block";
+      }
+    } catch (error: any) {
+      if (error instanceof NotionApiError && error.status === 400) {
+        // Fallback: parse error message if Notion gives us a hint
+        const match = /is a (page|database|data source|data_source|block), not a/i.exec(error.message);
+        if (match) {
+          targetType = match[1].toLowerCase().replace(" ", "_") as any;
+        } else {
+          throw error;
+        }
+      } else if (error instanceof NotionApiError && error.status === 404) {
+        // Fallback: could be a data_source since those aren't always standard blocks
+      } else {
+        throw error;
+      }
+    }
 
-    if (dbRes.status === "fulfilled") {
-      const database = dbRes.value;
+    if (!targetType) {
+      try {
+        const ds = await notionFetch<any>(token, `/data_sources/${targetId}`);
+        return Response.json({
+          type: "data_source",
+          id: ds.id,
+          title: ds.name ?? ds.title?.[0]?.plain_text ?? "Untitled data source",
+          dataSourceId: ds.id,
+          dataSourceName: ds.name,
+          columns: Object.keys(ds.properties ?? {}),
+          properties: ds.properties ?? {}
+        });
+      } catch (dsErr: any) {
+        throw new Error("Object not found or no access");
+      }
+    }
+
+    if (targetType === "database") {
+      const database = await notionFetch<NotionDatabase>(token, `/databases/${targetId}`);
       let columns = Object.keys(database.properties ?? {});
       let selectedColumns: string[] | undefined = undefined;
       
@@ -42,7 +92,6 @@ export async function GET(request: Request) {
             selectedColumns = viewVisibleNames;
           }
         } catch (err) {
-          // Ignore view errors and fallback to default columns
           console.error("Failed to fetch view:", err);
         }
       }
@@ -59,59 +108,14 @@ export async function GET(request: Request) {
       });
     }
 
-    if (dsRes.status === "fulfilled") {
-        const dataSource = dsRes.value;
-        return Response.json({
-          type: "data_source",
-          id: dataSource.id,
-          title: dataSource.name ?? dataSource.title?.[0]?.plain_text ?? "Untitled data source",
-          dataSourceId: dataSource.id,
-          dataSourceName: dataSource.name,
-          columns: Object.keys(dataSource.properties ?? {}),
-          properties: dataSource.properties ?? {}
-        });
+    if (targetType === "page") {
+      const page = await notionFetch<NotionPage>(token, `/pages/${targetId}`);
+      return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
     }
 
-    if (pageRes.status === "fulfilled") {
-        const page = pageRes.value;
-        return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
+    if (targetType === "block") {
+      return Response.json({ type: "block", id: blockData.id, title: blockTitle(blockData) || "Untitled block" });
     }
-
-    if (blockRes.status === "fulfilled") {
-        const block = blockRes.value;
-        if (block.type === "link_to_page" && block.link_to_page) {
-          const link = block.link_to_page;
-          if (link.type === "database_id" && link.database_id) {
-            try {
-              const db = await notionFetch<any>(token, `/databases/${link.database_id}`);
-              const actualDbId = db.data_sources?.[0]?.id ?? db.id;
-              return Response.json({
-                type: "database",
-                id: actualDbId,
-                title: databaseTitle(db),
-                dataSourceId: actualDbId,
-                dataSourceName: db.data_sources?.[0]?.name,
-                columns: Object.keys(db.properties ?? {}),
-                properties: db.properties ?? {}
-              });
-            } catch (dbErr) {
-              throw dbErr;
-            }
-          } else if (link.type === "page_id" && link.page_id) {
-            try {
-              const pg = await notionFetch<any>(token, `/pages/${link.page_id}`);
-              return Response.json({ type: "page", id: pg.id, title: pageTitle(pg) });
-            } catch (pgErr) {
-              throw pgErr;
-            }
-          }
-        }
-        return Response.json({ type: "block", id: block.id, title: blockTitle(block) || "Untitled block" });
-    }
-
-    // If all failed, throw the first "real" error or the last error
-    const firstError = [dbRes, dsRes, pageRes, blockRes].find(r => r.status === "rejected" && !isProbeMiss((r as PromiseRejectedResult).reason));
-    if (firstError) throw (firstError as PromiseRejectedResult).reason;
 
     throw new Error("Object not found or no access");
   } catch (error) {
