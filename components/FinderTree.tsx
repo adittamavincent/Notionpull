@@ -114,7 +114,31 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
         </span>
 
         <div className="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
-          <span className="truncate font-medium text-zinc-700 shrink-0">{node.title || "Untitled"}</span>
+          {node.kind === "row" && node.title && node.title.includes(" · ") ? (
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0 overflow-hidden py-0.5">
+              {node.title.split(" · ").map((part, index) => {
+                const colors = [
+                  "bg-rose-50/70 text-rose-700 border-rose-200/50",
+                  "bg-amber-50/70 text-amber-700 border-amber-200/50",
+                  "bg-emerald-50/70 text-emerald-700 border-emerald-200/50",
+                  "bg-cyan-50/70 text-cyan-700 border-cyan-200/50",
+                  "bg-indigo-50/70 text-indigo-700 border-indigo-200/50",
+                  "bg-purple-50/70 text-purple-700 border-purple-200/50",
+                ];
+                const colorClass = colors[index % colors.length];
+                return (
+                  <span 
+                    key={index} 
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold tracking-tight shadow-sm whitespace-nowrap ${colorClass}`}
+                  >
+                    {part || "Untitled"}
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="truncate font-medium text-zinc-700 shrink-0">{node.title || "Untitled"}</span>
+          )}
           {isDatabase && (
             <div 
               className="min-w-0 flex-1 flex items-center text-xs text-zinc-400 font-normal py-0.5 overflow-hidden whitespace-nowrap" 

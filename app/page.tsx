@@ -8,7 +8,7 @@ import { ExportProgress } from "@/components/ExportProgress";
 import { TokenManager } from "@/components/TokenManager";
 import { DebugModal } from "@/components/DebugModal";
 import { type ExportItem } from "@/lib/export";
-import { extractNotionIds, firstTitleProperty } from "@/lib/notion";
+import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
 import { History, RefreshCw, LogOut, X } from "lucide-react";
@@ -320,7 +320,7 @@ export default function Page() {
     setConfigOpen(true);
   }
 
-  function saveDatabaseConfig(nodeId: string, selectedColumns: string[]) {
+  function saveDatabaseConfig(nodeId: string, selectedColumns: string[], previewColumns?: string[]) {
     // Update the node in the current tree structure
     const updateNode = (list: TreeNodeData[]): TreeNodeData[] => {
       return list.map(n => {
@@ -329,7 +329,35 @@ export default function Page() {
             ...col,
             visible: selectedColumns.includes(col.name)
           }));
-          return { ...n, selectedColumns, columnDetails: updatedColumnDetails };
+          
+          let updatedChildren = n.children;
+          if (updatedChildren) {
+            updatedChildren = updatedChildren.map(child => {
+              if (child.kind === "row" && child.page) {
+                const page = child.page;
+                let newTitle = "";
+                if (previewColumns && previewColumns.length > 0) {
+                  newTitle = previewColumns
+                    .map(col => propertyValue(page.properties?.[col]))
+                    .filter(Boolean)
+                    .join(" · ");
+                } else {
+                  newTitle = firstTitleProperty(page);
+                }
+                return { ...child, title: newTitle || "Untitled" };
+              }
+              return child;
+            });
+          }
+          
+          return { 
+            ...n, 
+            selectedColumns, 
+            columnDetails: updatedColumnDetails, 
+            previewColumns, 
+            previewColumn: previewColumns?.[0], // Keep for fallback compatibility
+            children: updatedChildren 
+          };
         }
         if (n.children) {
           return { ...n, children: updateNode(n.children) };
@@ -521,7 +549,11 @@ export default function Page() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <div className="cursor-pointer select-none" onClick={clearWork} title="Start over">
             <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
-            <p className="text-xs font-medium text-zinc-500">{activeToken?.workspaceName ?? "No active workspace"}</p>
+            <p className="text-xs font-medium text-zinc-500">
+              {activeToken?.workspaceName 
+                ? `${activeToken.workspaceName} (${activeToken.label})` 
+                : activeToken?.label ?? "No active workspace"}
+            </p>
           </div>
           <div className="flex gap-2">
             <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
@@ -534,7 +566,7 @@ export default function Page() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-5 py-8">
+      <div className="w-full px-6 py-8">
         {!activeToken ? (
           <div className="flex min-h-[60vh] items-center justify-center">
             <div className="max-w-md rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center shadow-sm">
@@ -551,7 +583,33 @@ export default function Page() {
         ) : (
           <div className="space-y-6">
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
-              <label className="mb-2.5 block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
+                <label className="block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
+                
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
+                  <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
+                    {depthOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        className={`rounded px-2.5 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
+                        onClick={() => {
+                          if (option !== depth) {
+                            if (detected) {
+                              setLoadingTree(true);
+                            }
+                            setDepth(option);
+                          }
+                        }}
+                        disabled={loadingTree}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
               <div className="flex gap-2">
                 <div className="relative flex-1 group">
                   <input
@@ -625,26 +683,6 @@ export default function Page() {
             {detected && (
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 pr-1">
-                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
-                  </div>
-                  <div className="flex rounded-md border border-zinc-300 bg-white p-1 shadow-sm">
-                    {depthOptions.map((option) => (
-                      <button
-                        key={option}
-                        className={`rounded px-3 py-1 text-sm font-medium transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-600 hover:bg-zinc-100"}`}
-                        onClick={() => {
-                          if (option !== depth) {
-                            setLoadingTree(true);
-                            setDepth(option);
-                          }
-                        }}
-                        disabled={loadingTree}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
                   <button 
                     onClick={handleRefresh}
                     className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:bg-zinc-50"
@@ -680,8 +718,8 @@ export default function Page() {
       </div>
 
       {activeToken && selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 border-t border-zinc-200 bg-white/90 backdrop-blur-md px-5 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+        <div className="fixed inset-x-0 bottom-0 border-t border-zinc-200 bg-white/90 backdrop-blur-md px-6 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+          <div className="w-full flex items-center justify-between gap-3">
             <div className="text-sm font-medium text-zinc-700">
               <span className="inline-block rounded-full bg-zinc-100 px-2.5 py-0.5 text-zinc-900 mr-1.5">{selected.size}</span>
               items selected
@@ -836,7 +874,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       if (node.depth + 1 > maxDepth) return node;
       
       if (!node.children) {
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.depth + 1, node.id, memo);
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.depth + 1, node.id, memo, node.previewColumns);
         node.children = rows;
       }
       
@@ -848,16 +886,27 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", depth: number, parentId: string, memo: BuildMemo): Promise<TreeNodeData[]> {
+async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[]): Promise<TreeNodeData[]> {
   const rows = await memoRows(token, dataSourceId, kind, memo);
-  return rows.map((row) => ({
-    id: row.id,
-    title: firstTitleProperty(row),
-    kind: "row",
-    depth,
-    parentId,
-    page: row
-  }));
+  return rows.map((row) => {
+    let title = "";
+    if (previewColumns && previewColumns.length > 0) {
+      title = previewColumns
+        .map(col => propertyValue(row.properties?.[col]))
+        .filter(Boolean)
+        .join(" · ");
+    } else {
+      title = firstTitleProperty(row);
+    }
+    return {
+      id: row.id,
+      title: title || "Untitled",
+      kind: "row",
+      depth,
+      parentId,
+      page: row
+    };
+  });
 }
 
 async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails">> {

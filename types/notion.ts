@@ -65,6 +65,8 @@ export type TreeNodeData = {
   columns?: string[];
   selectedColumns?: string[];
   properties?: Record<string, any>;
+  previewColumn?: string;
+  previewColumns?: string[];
 };
 
 export type NotionRichText = {

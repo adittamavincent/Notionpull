@@ -6,6 +6,7 @@ Next.js 14 App Router app for fetching shared Notion pages, databases, and data 
 
 - **Finder-like Navigation:** Expandable list view for browsing nested Notion structures with intuitive icons.
 - **Granular Database Exports:** Configure which columns to export for each database, complete with a live data preview. Database views are automatically detected from URLs to perfectly respect your configured property ordering, column visibility, and widths. Full column details (ordering, widths, and visibility) are perfectly preserved during database configurations and fully exported ready.
+- **Custom Navigation Preview Column:** Choose any database column/property to serve as the display title for child rows in the Finder navigation tree, seamlessly replacing the hardcoded default Notion title column for customized visual organization.
 - **Simple Table Support:** Seamlessly detects, displays, and formats standard Notion simple tables into pristine Markdown tables, including granular selection of individual rows.
 - **Smart Caching:** Local memory caching ensures that returning to a previously fetched depth level is instant. 
 - **Recent URLs:** Quick access to recently fetched Notion URLs.
@@ -44,3 +45,4 @@ Open `http://localhost:3000`.
 - **Escape Key & Dismiss Shortcuts:** Token Manager dialog fully supports dismissing instantly via the `Escape` key shortcut or by clicking outside the modal overlay.
 - **Autofill-Resistant Token Inputs:** Token entry inputs are implemented with secure `type="text"` fields styled with visual character masking (`-webkit-text-security: disc`) to prevent password managers and browser credentials auto-fill, while offering a premium Eye-toggle button to show/hide the token.
 - **Reliable Fast Refresh / Dev Mode:** Local development mode is optimized to clear stale compilation cache in `.next` directories on startup, and React Strict Mode is disabled to avoid double HMR compiled instances and eradicate static asset `404` errors during hot reload.
+- **Custom Row Title Preview:** Finder navigation tree rows dynamically evaluate and display custom selected preview columns. Title properties of child rows are instantly updated across react states and the caching layer when the custom preview column config changes, falling back to standard Notion title schema parsing when no custom preview column is selected.

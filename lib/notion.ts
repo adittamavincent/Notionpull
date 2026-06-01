@@ -162,6 +162,12 @@ export function firstTitleProperty(page: NotionPage): string {
   return pageTitle(page);
 }
 
+export function getDefaultTitleColumn(properties?: Record<string, any>): string {
+  if (!properties) return "title";
+  const entry = Object.entries(properties).find(([, val]: any) => val?.type === "title");
+  return entry ? entry[0] : "title";
+}
+
 export function blockTitle(block: any): string {
   if (block.type === "child_page") return block.child_page?.title ?? "Untitled page";
   if (block.type === "child_database") return block.child_database?.title ?? "Untitled database";
