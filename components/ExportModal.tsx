@@ -9,16 +9,18 @@ type Props = {
   items: ExportItem[];
   titleById: Map<string, string>;
   onClose: () => void;
+  showIdForRelationRollup: boolean;
+  onToggleShowIdForRelationRollup: (val: boolean) => void;
 };
 
-export function ExportModal({ open, items, titleById, onClose }: Props) {
+export function ExportModal({ open, items, titleById, onClose, showIdForRelationRollup, onToggleShowIdForRelationRollup }: Props) {
   const [output, setOutput] = useState("");
 
   useEffect(() => {
     if (open && items.length > 0) {
-      setOutput(exportMarkdown(items, { titleById }));
+      setOutput(exportMarkdown(items, { titleById, showIdForRelationRollup }));
     }
-  }, [open, items, titleById]);
+  }, [open, items, titleById, showIdForRelationRollup]);
 
   useEffect(() => {
     if (!open) return;
@@ -56,6 +58,18 @@ export function ExportModal({ open, items, titleById, onClose }: Props) {
           </div>
 
           <div className="flex items-center gap-2">
+            <button 
+              className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                showIdForRelationRollup 
+                  ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800" 
+                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+              }`}
+              onClick={() => onToggleShowIdForRelationRollup(!showIdForRelationRollup)}
+              title="Toggle showing Notion IDs next to relation names"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${showIdForRelationRollup ? "bg-emerald-400 animate-pulse" : "bg-zinc-400"}`} />
+              Relation IDs
+            </button>
             <button className="flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={copy}>
               <Copy className="h-4 w-4" /> Copy
             </button>

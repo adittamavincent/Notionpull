@@ -11,9 +11,10 @@ type Props = {
   node: TreeNodeData | null;
   onClose: () => void;
   onSave: (nodeId: string, selectedColumns: string[], previewColumns?: string[]) => void;
+  showIdForRelationRollup?: boolean;
 };
 
-export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Props) {
+export function DatabaseConfigModal({ open, token, node, onClose, onSave, showIdForRelationRollup }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fetchedRows, setFetchedRows] = useState<NotionPage[]>([]);
   const [titleById, setTitleById] = useState<Map<string, string>>(new Map());
@@ -60,7 +61,10 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave }: Prop
     };
   }, [rows]);
 
-  const propertyValueOptions = useMemo(() => ({ titleById }), [titleById]);
+  const propertyValueOptions = useMemo(() => ({ 
+    titleById, 
+    showIdForRelationRollup 
+  }), [titleById, showIdForRelationRollup]);
 
   const defaultTitleCol = useMemo(() => {
     // 1. Try from rows properties

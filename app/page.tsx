@@ -40,6 +40,59 @@ export default function Page() {
   const [depth, setDepth] = useState<DepthOption>("1");
   const [loadingTree, setLoadingTree] = useState(false);
   const [error, setError] = useState("");
+
+  const [showRelationIds, setShowRelationIds] = useState(false);
+
+  // Load from localStorage on mount to avoid hydration mismatch
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("notionpull_show_relation_ids");
+      if (saved !== null) {
+        setShowRelationIds(saved === "true");
+      }
+    } catch {}
+  }, []);
+
+  const handleShowRelationIdsChange = (val: boolean) => {
+    setShowRelationIds(val);
+    try {
+      localStorage.setItem("notionpull_show_relation_ids", String(val));
+    } catch {}
+  };
+
+  // Reactively update custom preview node titles when showRelationIds changes
+  useEffect(() => {
+    setNodes((prevNodes) => {
+      const updateTreeTitles = (list: TreeNodeData[]): TreeNodeData[] => {
+        return list.map((n) => {
+          let updatedChildren = n.children;
+          if (updatedChildren) {
+            updatedChildren = updatedChildren.map((child) => {
+              if (child.kind === "row" && child.page) {
+                const page = child.page;
+                let newTitle = "";
+                if (n.previewColumns && n.previewColumns.length > 0) {
+                  newTitle = n.previewColumns
+                    .map((col) => propertyValue(page.properties?.[col], { showIdForRelationRollup: showRelationIds }))
+                    .filter(Boolean)
+                    .join(" · ");
+                } else {
+                  newTitle = firstTitleProperty(page);
+                }
+                return { ...child, title: newTitle || "Untitled" };
+              }
+              return child;
+            });
+          }
+          return {
+            ...n,
+            children: updatedChildren ? updateTreeTitles(updatedChildren) : undefined,
+          };
+        });
+      };
+      return updateTreeTitles(prevNodes);
+    });
+  }, [showRelationIds]);
   
   // Database Config State
   const [configNode, setConfigNode] = useState<TreeNodeData | null>(null);
@@ -250,7 +303,8 @@ export default function Page() {
       const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
         pageChildren: pageChildrenCache.current,
         databases: databaseCache.current,
-        rows: rowsCache.current
+        rows: rowsCache.current,
+        showIdForRelationRollup: showRelationIds
       });
       
       // Reconcile selection: If a node was already selected, make sure its new children follow the selection
@@ -338,7 +392,7 @@ export default function Page() {
                 let newTitle = "";
                 if (previewColumns && previewColumns.length > 0) {
                   newTitle = previewColumns
-                    .map(col => propertyValue(page.properties?.[col]))
+                    .map(col => propertyValue(page.properties?.[col], { showIdForRelationRollup: showRelationIds }))
                     .filter(Boolean)
                     .join(" · ");
                 } else {
@@ -586,28 +640,46 @@ export default function Page() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
                 <label className="block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
                 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
-                  <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
-                    {depthOptions.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        className={`rounded px-2.5 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
-                        onClick={() => {
-                          if (option !== depth) {
-                            if (detected) {
-                              setLoadingTree(true);
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
+                    <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
+                      {depthOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`rounded px-2.5 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
+                          onClick={() => {
+                            if (option !== depth) {
+                              if (detected) {
+                                setLoadingTree(true);
+                              }
+                              setDepth(option);
                             }
-                            setDepth(option);
-                          }
-                        }}
-                        disabled={loadingTree}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                          }}
+                          disabled={loadingTree}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  <div className="hidden sm:block h-5 w-px bg-zinc-300" />
+
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={showRelationIds}
+                        onChange={(e) => handleShowRelationIdsChange(e.target.checked)}
+                      />
+                      <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${showRelationIds ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                      <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${showRelationIds ? "translate-x-4" : "translate-x-0"}`} />
+                    </div>
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 group-hover:text-zinc-600 transition-colors">Relation IDs</span>
+                  </label>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -750,6 +822,7 @@ export default function Page() {
         node={configNode} 
         onClose={() => setConfigOpen(false)} 
         onSave={saveDatabaseConfig} 
+        showIdForRelationRollup={showRelationIds}
       />
 
       <ExportProgress 
@@ -764,6 +837,8 @@ export default function Page() {
         items={exportItems} 
         titleById={titleMap} 
         onClose={() => setExportItems([])} 
+        showIdForRelationRollup={showRelationIds}
+        onToggleShowIdForRelationRollup={handleShowRelationIdsChange}
       />
 
       <DebugModal open={debugOpen} onClose={() => setDebugOpen(false)} />
@@ -813,6 +888,7 @@ type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
   databases: Map<string, Promise<DatabaseResponse>>;
   rows: Map<string, Promise<NotionPage[]>>;
+  showIdForRelationRollup?: boolean;
 };
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
@@ -892,7 +968,7 @@ async function rowNodes(token: string, dataSourceId: string, kind: "database" | 
     let title = "";
     if (previewColumns && previewColumns.length > 0) {
       title = previewColumns
-        .map(col => propertyValue(row.properties?.[col]))
+        .map(col => propertyValue(row.properties?.[col], { showIdForRelationRollup: memo.showIdForRelationRollup }))
         .filter(Boolean)
         .join(" · ");
     } else {

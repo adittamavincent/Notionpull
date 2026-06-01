@@ -62,6 +62,7 @@ export function pageTitle(page: NotionPage): string {
 
 export type PropertyValueOptions = {
   titleById?: Map<string, string> | Record<string, string>;
+  showIdForRelationRollup?: boolean;
 };
 
 export function propertyValue(prop: any, options: PropertyValueOptions = {}): string {
@@ -96,7 +97,10 @@ export function propertyValue(prop: any, options: PropertyValueOptions = {}): st
     case "relation":
       return prop.relation?.map((rel: any) => {
         const title = rel.title ?? titleForId(rel.id, options);
-        return title ? `${title} (${rel.id})` : rel.id;
+        if (options.showIdForRelationRollup) {
+          return title ? `${title} (${rel.id})` : rel.id;
+        }
+        return title || rel.id;
       }).filter(Boolean).join(", ") ?? "";
     case "rollup":
       return rollupValue(prop.rollup, options);
