@@ -791,6 +791,33 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           parentId: node.id,
           dataSourceName: child.dataSourceName
         }));
+
+        if (node.kind === "row" && node.page?.properties) {
+          const allIds = extractNotionIds(JSON.stringify(node.page.properties));
+          const uniqueIds = Array.from(new Set(allIds)).filter(id => id !== node.id && id !== node.parentId);
+          if (uniqueIds.length > 0) {
+            const detectedResults = await Promise.allSettled(
+              uniqueIds.map(id => apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`))
+            );
+            for (const result of detectedResults) {
+              if (result.status === "fulfilled" && result.value) {
+                const dp = result.value;
+                if (dp.type === "database" || dp.type === "page" || dp.type === "data_source") {
+                  if (!node.children.some(c => c.id === dp.id)) {
+                    node.children.push({
+                      id: dp.id,
+                      title: dp.title,
+                      kind: dp.type as any,
+                      depth: node.depth + 1,
+                      parentId: node.id,
+                      dataSourceName: dp.dataSourceName
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
       }
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
