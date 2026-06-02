@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Copy, Download, X } from "lucide-react";
+import { Copy, Download, X, Check } from "lucide-react";
 import { exportMarkdown, type ExportItem } from "@/lib/export";
 
 type Props = {
@@ -15,6 +15,7 @@ type Props = {
 
 export function ExportModal({ open, items, titleById, onClose, showIdForRelationRollup, onToggleShowIdForRelationRollup }: Props) {
   const [output, setOutput] = useState("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (open && items.length > 0) {
@@ -37,6 +38,8 @@ export function ExportModal({ open, items, titleById, onClose, showIdForRelation
 
   async function copy() {
     await navigator.clipboard.writeText(output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   function download() {
@@ -70,8 +73,16 @@ export function ExportModal({ open, items, titleById, onClose, showIdForRelation
               <span className={`h-1.5 w-1.5 rounded-full ${showIdForRelationRollup ? "bg-emerald-400 animate-pulse" : "bg-zinc-400"}`} />
               Relation IDs
             </button>
-            <button className="flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={copy}>
-              <Copy className="h-4 w-4" /> Copy
+            <button 
+              className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-all ${
+                copied 
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 active:bg-emerald-100" 
+                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 active:scale-95"
+              }`} 
+              onClick={copy}
+            >
+              {copied ? <Check className="h-4 w-4 text-emerald-600 animate-in fade-in zoom-in-75 duration-200" /> : <Copy className="h-4 w-4" />}
+              {copied ? "Copied!" : "Copy"}
             </button>
             <button className="flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={download}>
               <Download className="h-4 w-4" /> Download

@@ -1,5 +1,5 @@
 import type { NotionBlock, NotionPage } from "@/types/notion";
-import { propertyValue, type PropertyValueOptions } from "@/lib/notion";
+import { propertyValue, pageTitle, type PropertyValueOptions } from "@/lib/notion";
 
 export type DatabaseExportItem = { 
   kind: "database" | "data_source"; 
@@ -70,10 +70,9 @@ function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): s
   
   const head = [`${hMain} ${item.title}`];
 
-  const metadataLines = getMetadataLines(item);
-  if (metadataLines.length > 0) {
+  if (item.id) {
     head.push("");
-    head.push(`**Props:** ${metadataLines.join("; ")}`);
+    head.push(`**Database ID:** ${item.id}`);
   }
 
   const viewLine = getViewLine(item);
@@ -82,31 +81,45 @@ function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): s
     head.push(`**View:** ${viewLine}`);
   }
 
-  const columnLine = getColumnLine(item);
-  if (columnLine) {
+  const mergedColumnsLine = getMergedColumnsLine(item);
+  if (mergedColumnsLine) {
     head.push("");
-    head.push(`**Columns:** ${columnLine}`);
+    head.push(`**Columns:** ${mergedColumnsLine}`);
   }
 
   if (!columns.length) return head.join("\n") + "\n\n_Empty_";
   
   head.push("");
-  head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
-  head.push(`| ${columns.map(() => "---").join(" | ")} |`);
-  for (const row of item.rows) {
-    head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
+  if (item.rows.length === 0) {
+    head.push("_Empty_");
+  } else if (item.rows.length > 1) {
+    head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
+    head.push(`| ${columns.map(() => "---").join(" | ")} |`);
+    for (const row of item.rows) {
+      head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
+    }
+  } else {
+    // Exactly 1 row. Render beautifully as a list of bulleted properties under the entry name
+    const row = item.rows[0];
+    const rowTitle = pageTitle(row) || "Untitled Entry";
+    head.push(`**Entry:** ${rowTitle}`);
+    for (const column of columns) {
+      const val = propertyValue(row.properties?.[column], options);
+      head.push(`- **${column}:** ${val}`);
+    }
   }
   return head.join("\n");
 }
 
-function getMetadataLines(item: DatabaseExportItem): string[] {
+function getMergedColumnsLine(item: DatabaseExportItem): string {
   const columns = databaseColumns(item);
-  const metadataLines: string[] = [];
-  if (item.properties) {
-    for (const column of columns) {
-      const prop = item.properties[column];
-      if (!prop) continue;
-
+  const parts: string[] = [];
+  
+  for (const columnName of columns) {
+    // 1. Get property details (type, options, description)
+    const prop = item.properties?.[columnName];
+    let propInfoStr = "";
+    if (prop) {
       let columnInfo = "";
       if (prop.type === "select" && prop.select?.options?.length > 0) {
         columnInfo = `${prop.select.options.map((o: any) => o.name).join(",")}`;
@@ -118,26 +131,33 @@ function getMetadataLines(item: DatabaseExportItem): string[] {
 
       const infoPart = columnInfo ? `: ${columnInfo}` : "";
       const descPart = prop.description ? ` (${prop.description})` : "";
-      metadataLines.push(`\`${column}\` (${prop.type}${infoPart}${descPart})`);
+      propInfoStr = ` (${prop.type}${infoPart}${descPart})`;
     }
+
+    // 2. Get visibility/width from columnDetails
+    const detail = item.columnDetails?.find((d) => d.name === columnName);
+    let stateStr = "visible";
+    let widthStr = "";
+    if (detail) {
+      if (detail.visible === false) {
+        stateStr = "hidden";
+      }
+      if (detail.width !== undefined) {
+        widthStr = `, ${detail.width}px`;
+      }
+    }
+    const layoutStr = ` [${stateStr}${widthStr}]`;
+
+    parts.push(`\`${columnName}\`${propInfoStr}${layoutStr}`);
   }
-  return metadataLines;
+
+  return parts.join("; ");
 }
 
 function getViewLine(item: DatabaseExportItem): string {
   if (!item.viewId && !item.viewTitle) return "";
   if (item.viewTitle && item.viewId) return `${item.viewTitle} (${item.viewId})`;
   return item.viewTitle || item.viewId || "";
-}
-
-function getColumnLine(item: DatabaseExportItem): string {
-  const details = item.columnDetails ?? [];
-  if (details.length === 0) return "";
-  return details.map((column) => {
-    const state = column.visible === false ? "hidden" : "visible";
-    const width = column.width !== undefined ? `, ${column.width}px` : "";
-    return `${column.name} [${state}${width}]`;
-  }).join("; ");
 }
 
 function databaseColumns(item: DatabaseExportItem): string[] {
