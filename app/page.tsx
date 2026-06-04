@@ -534,10 +534,10 @@ export default function Page() {
                 if (block.type === "child_database") {
                   const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`, { signal: controller.signal, onStatus: setExportStatus });
                   const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
-                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}:${dbTreeNode?.viewId ?? ""}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, dbTreeNode?.viewId, undefined, { signal: controller.signal, onStatus: setExportStatus }));
                   
                   // Filter nested database rows based on whether their tree node row IDs are selected
                   const dbTreeNode = flatNodes.find(n => n.id === block.id);
+                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}:${dbTreeNode?.viewId ?? ""}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, dbTreeNode?.viewId, undefined, { signal: controller.signal, onStatus: setExportStatus }));
                   let exportDbRows: NotionPage[] = [];
                   if (dbTreeNode && dbTreeNode.children && dbTreeNode.children.length > 0) {
                     const selectedRowIds = new Set(dbTreeNode.children.filter(c => selected.has(c.id)).map(c => c.id));
