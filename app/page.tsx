@@ -118,6 +118,8 @@ export default function Page() {
   const databaseCache = useRef<Map<string, Promise<DatabaseResponse>>>(new Map());
   const rowsCache = useRef<Map<string, Promise<NotionPage[]>>>(new Map());
   const titleCache = useRef<Map<string, string>>(new Map());
+  const treeAbortRef = useRef<AbortController | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => refreshTokens(), []);
 
@@ -217,6 +219,9 @@ export default function Page() {
   async function submitUrl(event: FormEvent) {
     event.preventDefault();
     if (!activeToken || !url.trim()) return;
+    treeAbortRef.current?.abort();
+    const controller = new AbortController();
+    treeAbortRef.current = controller;
     setError("");
     setLoadingTree(true);
     setDetected(null);
@@ -235,7 +240,7 @@ export default function Page() {
       
       // Try all IDs in parallel for faster detection
       const results = await Promise.allSettled(
-        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`))
+        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
       );
       
       const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
@@ -243,20 +248,27 @@ export default function Page() {
       if (successful) {
         setDetected(successful.value);
         saveUrlHistory(url.trim(), successful.value.title, successful.value.type);
-        await loadTree(successful.value, depth);
+        await loadTree(successful.value, depth, false, controller);
       } else {
         // Find the most relevant error
         const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
         throw firstError?.reason || new Error("Could not detect any Notion object in this URL.");
       }
     } catch (err) {
-      setError(errorMessage(err));
+      if (!isAbortError(err)) setError(errorMessage(err));
       setLoadingTree(false);
+    } finally {
+      if (treeAbortRef.current === controller) treeAbortRef.current = null;
     }
   }
 
-  async function loadTree(object: DetectedObject | null = detected, currentDepth: DepthOption = depth, forceRefresh = false) {
+  async function loadTree(object: DetectedObject | null = detected, currentDepth: DepthOption = depth, forceRefresh = false, controller?: AbortController) {
     if (!activeToken || !object) return;
+    if (!controller) {
+      treeAbortRef.current?.abort();
+      controller = new AbortController();
+      treeAbortRef.current = controller;
+    }
     setLoadingTree(true);
     setError("");
     if (forceRefresh) {
@@ -304,7 +316,8 @@ export default function Page() {
         pageChildren: pageChildrenCache.current,
         databases: databaseCache.current,
         rows: rowsCache.current,
-        showIdForRelationRollup: showRelationIds
+        showIdForRelationRollup: showRelationIds,
+        signal: controller.signal
       });
       
       // Reconcile selection: If a node was already selected, make sure its new children follow the selection
@@ -332,8 +345,9 @@ export default function Page() {
       setNodes([root]);
       setLastFetch(new Date());
     } catch (err) {
-      setError(errorMessage(err));
+      if (!isAbortError(err)) setError(errorMessage(err));
     } finally {
+      if (treeAbortRef.current === controller) treeAbortRef.current = null;
       setLoadingTree(false);
     }
   }
@@ -434,6 +448,9 @@ export default function Page() {
 
   async function runExport() {
     if (!activeToken || !selectedNodes.length) return;
+    exportAbortRef.current?.abort();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
     setExporting(true);
     setError("");
     
@@ -460,7 +477,7 @@ export default function Page() {
           const containerKind = node.kind === "data_source" ? "data_source" : "database";
           const database = node.dataSourceId && node.columns && node.properties
             ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties, columnDetails: node.columnDetails }
-            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${node.id}?kind=${encodeURIComponent(containerKind)}`);
+            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${node.id}?kind=${encodeURIComponent(containerKind)}`, { signal: controller.signal, onStatus: setExportStatus });
           
           // Estimate number of batches to give granular progress
           // Notion usually fetches in batches of 100
@@ -475,7 +492,7 @@ export default function Page() {
                 const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
                 setExportCurrent(progress);
                 setExportStatus(`Loading ${node.title} (${count} rows)...`);
-            })
+            }, { signal: controller.signal, onStatus: setExportStatus })
           );
             
           let exportRows: NotionPage[] = [];
@@ -508,16 +525,16 @@ export default function Page() {
           if (shouldFetchPageContent(node, depth)) {
             try {
               const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () => 
-                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`)
+                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`, { signal: controller.signal, onStatus: setExportStatus })
               );
               blocks = body.results;
 
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
                 if (block.type === "child_database") {
-                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`);
+                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`, { signal: controller.signal, onStatus: setExportStatus });
                   const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
-                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind));
+                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, undefined, { signal: controller.signal, onStatus: setExportStatus }));
                   
                   // Filter nested database rows based on whether their tree node row IDs are selected
                   const dbTreeNode = flatNodes.find(n => n.id === block.id);
@@ -571,7 +588,7 @@ export default function Page() {
       }
       
       setExportStatus("Generating export mapping...");
-      const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current);
+      const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current, { signal: controller.signal, onStatus: setExportStatus });
       
       setExportStatus("Ready!");
       setTitleMap(titleById);
@@ -581,20 +598,37 @@ export default function Page() {
       setExportCurrent(selectedNodes.length * UNITS_PER_NODE);
       
     } catch (err) {
-      setError(errorMessage(err));
+      if (!isAbortError(err)) setError(errorMessage(err));
     } finally {
       // Keep open just long enough for the satisfaction animation to complete
-      setTimeout(() => setExporting(false), 800); 
+      const delay = controller.signal.aborted ? 0 : 800;
+      setTimeout(() => setExporting(false), delay);
+      if (exportAbortRef.current === controller) exportAbortRef.current = null;
     }
   }
 
+  function cancelExport() {
+    exportAbortRef.current?.abort();
+    setExportStatus("Cancelled.");
+    setExporting(false);
+  }
+
+  function cancelFetch() {
+    treeAbortRef.current?.abort();
+    setLoadingTree(false);
+  }
+
   function clearWork() {
+    treeAbortRef.current?.abort();
+    exportAbortRef.current?.abort();
     setUrl("");
     setDetected(null);
     setNodes([]);
     setSelected(new Set());
     setExportItems([]);
     setError("");
+    setLoadingTree(false);
+    setExporting(false);
   }
 
   return (
@@ -714,6 +748,16 @@ export default function Page() {
                     "Fetch"
                   )}
                 </button>
+                {loadingTree && (
+                  <button
+                    type="button"
+                    onClick={cancelFetch}
+                    className="flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </button>
+                )}
               </div>
               
               {urlHistory.length > 0 && !detected && (
@@ -830,6 +874,7 @@ export default function Page() {
         total={exportTotal} 
         current={exportCurrent} 
         status={exportStatus}
+        onCancel={cancelExport}
       />
 
       <ExportModal 
@@ -889,6 +934,7 @@ type BuildMemo = {
   databases: Map<string, Promise<DatabaseResponse>>;
   rows: Map<string, Promise<NotionPage[]>>;
   showIdForRelationRollup?: boolean;
+  signal?: AbortSignal;
 };
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
@@ -910,12 +956,9 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           const allIds = extractNotionIds(JSON.stringify(node.page.properties));
           const uniqueIds = Array.from(new Set(allIds)).filter(id => id !== node.id && id !== node.parentId);
           if (uniqueIds.length > 0) {
-            const detectedResults = await Promise.allSettled(
-              uniqueIds.map(id => apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`))
-            );
-            for (const result of detectedResults) {
-              if (result.status === "fulfilled" && result.value) {
-                const dp = result.value;
+            for (const id of uniqueIds) {
+              try {
+                const dp = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, { signal: memo.signal });
                 if (dp.type === "database" || dp.type === "page" || dp.type === "data_source") {
                   if (!node.children.some(c => c.id === dp.id)) {
                     node.children.push({
@@ -928,6 +971,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
                     });
                   }
                 }
+              } catch (err) {
+                if (isAbortError(err)) throw err;
               }
             }
           }
@@ -1015,7 +1060,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
     };
   } catch {
     const viewQuery = node.viewId ? `&viewId=${encodeURIComponent(node.viewId)}` : "";
-    const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}${viewQuery}`);
+    const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}${viewQuery}`, { signal: memo.signal });
     return {
       kind: detected.type === "data_source" ? "data_source" : "database",
       dataSourceId: detected.dataSourceId ?? node.id,
@@ -1032,19 +1077,19 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
 
 function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promise<PageChildrenResponse> {
   return memoFetch(memo.pageChildren, `${token}:page:${pageId}`, () => (
-    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children`)
+    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children`, { signal: memo.signal })
   ));
 }
 
 function memoDatabase(token: string, databaseId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo): Promise<DatabaseResponse> {
   const viewQuery = viewId ? `&viewId=${encodeURIComponent(viewId)}` : "";
   return memoFetch(memo.databases, `${token}:database:${databaseId}:${kind}:${viewId ?? ""}`, () => (
-    apiFetch<DatabaseResponse>(token, `/api/notion/database/${databaseId}?kind=${encodeURIComponent(kind)}${viewQuery}`)
+    apiFetch<DatabaseResponse>(token, `/api/notion/database/${databaseId}?kind=${encodeURIComponent(kind)}${viewQuery}`, { signal: memo.signal })
   ));
 }
 
 function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", memo: BuildMemo): Promise<NotionPage[]> {
-  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}`, () => fetchAllRows(token, dataSourceId, kind));
+  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}`, () => fetchAllRows(token, dataSourceId, kind, undefined, { signal: memo.signal }));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -1064,12 +1109,21 @@ function resolveRowSourceKind(containerId: string, dataSourceId: string | undefi
   return kind === "data_source" ? "data_source" : "database";
 }
 
-async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", onProgress?: (count: number) => void): Promise<NotionPage[]> {
+type ApiFetchOptions = {
+  signal?: AbortSignal;
+  onStatus?: (message: string) => void;
+};
+
+let notionClientQueue: Promise<void> = Promise.resolve();
+let notionClientBlockedUntil = 0;
+const NOTION_MIN_REQUEST_SPACING_MS = 375;
+
+async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", onProgress?: (count: number) => void, options: ApiFetchOptions = {}): Promise<NotionPage[]> {
   const rows: NotionPage[] = [];
   let cursor: string | null = null;
   do {
     const qs: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows${qs}${qs ? "&" : "?"}kind=${encodeURIComponent(kind)}`);
+    const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows${qs}${qs ? "&" : "?"}kind=${encodeURIComponent(kind)}`, options);
     rows.push(...body.results);
     cursor = body.has_more ? body.next_cursor : null;
     if (onProgress) onProgress(rows.length);
@@ -1077,26 +1131,85 @@ async function fetchAllRows(token: string, dataSourceId: string, kind: "database
   return rows;
 }
 
-async function apiFetch<T>(token: string, url: string, attempt = 0): Promise<T> {
+async function apiFetch<T>(token: string, url: string, options: ApiFetchOptions = {}, attempt = 0): Promise<T> {
+  await waitForNotionTurn(options);
   let response: Response;
   try {
-    response = await fetch(url, { headers: { "x-notion-token": token } });
-  } catch {
+    response = await fetch(url, { headers: { "x-notion-token": token }, signal: options.signal });
+  } catch (err) {
+    if (isAbortError(err)) throw err;
     throw new Error("Could not reach Notion — check your connection");
   }
   const body = await response.json().catch(() => ({}));
-  if (response.status === 429 && attempt < 2) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    return apiFetch<T>(token, url, attempt + 1);
+  if (response.status === 429 && attempt < 5) {
+    const retryMs = retryAfterMs(response.headers.get("retry-after"), attempt);
+    notionClientBlockedUntil = Math.max(notionClientBlockedUntil, Date.now() + retryMs);
+    options.onStatus?.(`Notion rate limit hit. Pausing ${formatWait(retryMs)} before retry ${attempt + 1}/5.`);
+    await sleep(retryMs, options.signal);
+    return apiFetch<T>(token, url, options, attempt + 1);
   }
   if (!response.ok) throw new Error(mapHttpError(response.status, body.error));
   return body as T;
 }
 
+async function waitForNotionTurn(options: ApiFetchOptions) {
+  const previous = notionClientQueue;
+  let release!: () => void;
+  notionClientQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const waitMs = Math.max(NOTION_MIN_REQUEST_SPACING_MS, notionClientBlockedUntil - Date.now());
+    if (waitMs > 0) {
+      if (waitMs > NOTION_MIN_REQUEST_SPACING_MS) {
+        options.onStatus?.(`Notion is cooling down. Next request in ${formatWait(waitMs)}.`);
+      }
+      await sleep(waitMs, options.signal);
+    }
+  } finally {
+    release();
+  }
+}
+
+function retryAfterMs(header: string | null, attempt: number): number {
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds * 1000);
+    const dateMs = Date.parse(header);
+    if (Number.isFinite(dateMs)) return Math.max(1000, dateMs - Date.now());
+  }
+  return Math.min(30000, 2000 * 2 ** attempt);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      window.clearTimeout(timeout);
+      reject(abortError());
+    }, { once: true });
+  });
+}
+
+function formatWait(ms: number): string {
+  const seconds = Math.max(1, Math.ceil(ms / 1000));
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
+}
+
+function abortError() {
+  return new DOMException("Cancelled", "AbortError");
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function mapHttpError(status: number, detail?: string): string {
   if (status === 401) return "Token invalid or expired — check your Notion token";
   if (status === 404) return "Not found — make sure the integration has access to this page (Share → Invite integration)";
-  if (status === 429) return "Rate limited — waiting 2 seconds...";
+  if (status === 429) return "Notion rate limit is still active. Try again after the current cooldown finishes.";
   return detail ?? "Unexpected error";
 }
 
@@ -1112,7 +1225,7 @@ function shouldFetchPageContent(node: TreeNodeData, currentDepth: DepthOption): 
   return true;
 }
 
-async function buildExportTitleMap(token: string, items: ExportItem[], nodes: TreeNodeData[], cache: Map<string, string>): Promise<Map<string, string>> {
+async function buildExportTitleMap(token: string, items: ExportItem[], nodes: TreeNodeData[], cache: Map<string, string>, options: ApiFetchOptions = {}): Promise<Map<string, string>> {
   const titleById = new Map(cache);
   for (const node of nodes) setKnownTitle(titleById, cache, node.id, node.title);
   for (const item of items) {
@@ -1128,15 +1241,19 @@ async function buildExportTitleMap(token: string, items: ExportItem[], nodes: Tr
   }
 
   const missingIds = Array.from(titleById.entries()).filter(([, title]) => !title).map(([id]) => id);
-  await Promise.all(missingIds.map(async (id) => {
+  let resolved = 0;
+  for (const id of missingIds) {
     try {
-      const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`);
+      options.onStatus?.(`Resolving linked titles ${resolved + 1}/${missingIds.length}...`);
+      const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, options);
       titleById.set(id, object.title);
       cache.set(id, object.title);
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       titleById.set(id, "");
     }
-  }));
+    resolved += 1;
+  }
   return titleById;
 }
 

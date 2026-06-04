@@ -2,16 +2,17 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 
 type Props = {
   open: boolean;
   total: number;
   current: number;
   status?: string;
+  onCancel?: () => void;
 };
 
-export function ExportProgress({ open, total, current, status }: Props) {
+export function ExportProgress({ open, total, current, status, onCancel }: Props) {
   const [displayCurrent, setDisplayCurrent] = useState(0);
 
   // Smooth out the progress jumps
@@ -129,6 +130,17 @@ export function ExportProgress({ open, total, current, status }: Props) {
             transition={{ ease: "linear", duration: 0.1 }}
           />
         </div>
+
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mt-5 flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+          >
+            <X className="h-4 w-4" />
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );

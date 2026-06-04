@@ -200,6 +200,10 @@ export function blockTitle(block: any): string {
 
 import { addLog } from "./logger";
 
+let notionServerQueue: Promise<void> = Promise.resolve();
+let notionServerBlockedUntil = 0;
+const NOTION_MIN_REQUEST_SPACING_MS = 375;
+
 export async function notionFetch<T>(
   token: string,
   path: string,
@@ -238,6 +242,7 @@ export async function notionFetch<T>(
   let capturedError: any = null;
 
   try {
+    await waitForNotionTurn();
     const response = await fetch(url, {
       ...init,
       headers: {
@@ -298,6 +303,11 @@ export async function notionFetch<T>(
       if (responseBodyJson?.message) {
         message = responseBodyJson.message;
       }
+      if (response.status === 429) {
+        const retryMs = retryAfterMs(response.headers.get("retry-after"));
+        notionServerBlockedUntil = Math.max(notionServerBlockedUntil, Date.now() + retryMs);
+        message = `Notion rate limit hit. Cooldown ${formatWait(retryMs)}.`;
+      }
       capturedError = new NotionApiError(response.status, message);
     }
 
@@ -312,6 +322,40 @@ export async function notionFetch<T>(
   }
 
   throw capturedError;
+}
+
+async function waitForNotionTurn() {
+  const previous = notionServerQueue;
+  let release!: () => void;
+  notionServerQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const waitMs = Math.max(NOTION_MIN_REQUEST_SPACING_MS, notionServerBlockedUntil - Date.now());
+    if (waitMs > 0) await sleep(waitMs);
+  } finally {
+    release();
+  }
+}
+
+function retryAfterMs(header: string | null): number {
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds * 1000);
+    const dateMs = Date.parse(header);
+    if (Number.isFinite(dateMs)) return Math.max(1000, dateMs - Date.now());
+  }
+  return 5000;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatWait(ms: number): string {
+  const seconds = Math.max(1, Math.ceil(ms / 1000));
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
 }
 
 export function tokenFromRequest(request: Request): string {
