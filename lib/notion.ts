@@ -226,6 +226,7 @@ export async function notionFetch<T>(
     url,
     tracePath: trace?.tracePath,
     requestHeaders: {
+      Authorization: `Bearer ${token}`,
       "Notion-Version": NOTION_VERSION,
       "Content-Type": "application/json",
       ...(trace?.tracePath ? { "X-Debug-Trace-Path": trace.tracePath } : {}),

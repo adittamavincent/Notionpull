@@ -15,9 +15,9 @@ export async function GET(request: Request, { params }: Params) {
       ? await notionFetch<any>(token, `/data_sources/${params.id}`, {}, { tracePath: traceChild(traceRoot, "data-source") })
       : await notionFetch<any>(token, `/databases/${params.id}`, {}, { tracePath: traceChild(traceRoot, "database") });
 
-    const dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
-    const dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
-    let views: Array<{ id: string; title?: string; configuration?: any }> = [];
+    let dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
+    let dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
+    let views: Array<{ id: string; title?: string; data_source_id?: string; configuration?: any }> = [];
     let activeView: any = null;
     if (!isDataSource) {
       try {
@@ -31,6 +31,7 @@ export async function GET(request: Request, { params }: Params) {
             return {
               id: view.id,
               title: view.title ?? view.name ?? (viewType && view[viewType]?.title) ?? (viewType && view[viewType]?.name),
+              data_source_id: view.data_source_id,
               configuration
             };
           } catch {
@@ -47,6 +48,10 @@ export async function GET(request: Request, { params }: Params) {
       if (!activeView && views.length > 0) {
         activeView = views[0];
       }
+      if (activeView?.data_source_id) {
+        dataSourceId = activeView.data_source_id;
+        dataSourceName = database.data_sources?.find((source: any) => source.id === dataSourceId)?.name ?? dataSourceName;
+      }
     }
     
     // If it's a data source, we already have it. If it's a database, we want the source props specifically.
@@ -55,6 +60,7 @@ export async function GET(request: Request, { params }: Params) {
     if (!isDataSource) {
       try {
         dataSource = await notionFetch<any>(token, `/data_sources/${dataSourceId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
+        dataSourceName = dataSource?.name ?? dataSourceName;
       } catch {
         dataSource = database;
       }

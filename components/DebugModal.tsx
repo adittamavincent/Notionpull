@@ -3,6 +3,7 @@ import { X, Activity, RefreshCw, Trash2, ChevronRight, ChevronDown, TerminalSqua
 import type { LogEntry } from "@/lib/logger";
 
 type DebugViewMode = "chronological" | "tree";
+type LogCopyMode = "surface" | "full";
 
 type TreeLogNode = {
   key: string;
@@ -234,6 +235,44 @@ function formatDetailedLog(log: LogEntry) {
   return lines.join("\n");
 }
 
+function jsonText(value: unknown) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value ?? null, null, 2);
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function formatCurlRequest(log: LogEntry) {
+  const parts = [`curl -X ${log.method} ${shellQuote(log.url)}`];
+  for (const [key, value] of Object.entries(log.requestHeaders ?? {})) {
+    parts.push(`  -H ${shellQuote(`${key}: ${value}`)}`);
+  }
+  if (log.requestBody !== undefined) {
+    parts.push(`  --data ${shellQuote(jsonText(log.requestBody))}`);
+  }
+  return parts.join(" \\\n");
+}
+
+function formatResponseJson(log: LogEntry) {
+  return jsonText({
+    status: log.status,
+    error: log.error,
+    body: log.responseBody ?? null,
+  });
+}
+
+function formatSurfaceLog(log: LogEntry) {
+  const time = formatClock(log.timestamp);
+  const cleanUrl = formatPath(log.url);
+  const nameInfo = log.nameTag
+    ? `"${log.nameTag}"${log.objectType ? ` (${log.objectType})` : ''}`
+    : (log.objectType ? `(${log.objectType})` : '');
+
+  return `[${time}] ${log.method.padEnd(4)} ${log.status} - ${nameInfo ? nameInfo + ' - ' : ''}${cleanUrl} (${log.duration}ms)`;
+}
+
 function formatErrorLogs(logs: LogEntry[]) {
   return logs
     .filter((log) => log.status >= 400 || Boolean(log.error))
@@ -250,12 +289,20 @@ function TreeBranch({
   expandedId,
   onToggleCollapsed,
   onToggleExpanded,
+  onCopyRequest,
+  onCopyResponse,
+  copiedRequestId,
+  copiedResponseId,
 }: {
   node: TreeLogNode;
   collapsedIds: Set<string>;
   expandedId: string | null;
   onToggleCollapsed: (id: string) => void;
   onToggleExpanded: (id: string) => void;
+  onCopyRequest: (log: LogEntry) => void;
+  onCopyResponse: (log: LogEntry) => void;
+  copiedRequestId: string | null;
+  copiedResponseId: string | null;
 }) {
   const isCollapsed = collapsedIds.has(node.key);
   const isExpanded = node.log ? expandedId === node.log.id : false;
@@ -325,7 +372,12 @@ function TreeBranch({
             <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div>
-                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                    <button type="button" onClick={() => onCopyRequest(node.log!)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
+                      {copiedRequestId === node.log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy request
+                    </button>
+                  </div>
                   <div className="overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
                     <div className="mb-2 text-blue-400">{node.log.method} {node.log.url}</div>
                     {node.log.requestHeaders && Object.entries(node.log.requestHeaders).map(([key, value]) => (
@@ -339,15 +391,14 @@ function TreeBranch({
                   </div>
                 </div>
                 <div>
-                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Response</h4>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
+                    <button type="button" onClick={() => onCopyResponse(node.log!)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
+                      {copiedResponseId === node.log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy response
+                    </button>
+                  </div>
                   <div className="h-full max-h-[320px] overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
-                    {node.log.error ? (
-                      <div className="text-red-400">{node.log.error}</div>
-                    ) : (
-                      <pre className={isError ? "text-red-300" : "text-zinc-300"}>
-                        {JSON.stringify(node.log.responseBody, null, 2)}
-                      </pre>
-                    )}
+                    <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(node.log)}</pre>
                   </div>
                 </div>
               </div>
@@ -383,6 +434,10 @@ function TreeBranch({
               expandedId={expandedId}
               onToggleCollapsed={onToggleCollapsed}
               onToggleExpanded={onToggleExpanded}
+              onCopyRequest={onCopyRequest}
+              onCopyResponse={onCopyResponse}
+              copiedRequestId={copiedRequestId}
+              copiedResponseId={copiedResponseId}
             />
           ))}
         </div>
@@ -399,6 +454,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [collapsedTreeIds, setCollapsedTreeIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
   const [copiedErrors, setCopiedErrors] = useState(false);
+  const [copyMode, setCopyMode] = useState<LogCopyMode>("surface");
+  const [copiedRequestId, setCopiedRequestId] = useState<string | null>(null);
+  const [copiedResponseId, setCopiedResponseId] = useState<string | null>(null);
   const clearedAtRef = useRef(0);
 
   const treeRoots = useMemo(() => buildTree(logs), [logs]);
@@ -429,15 +487,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   const handleCopySurfaceLogs = async () => {
     if (logs.length === 0) return;
     
-    const text = logs.map(log => {
-      const time = formatClock(log.timestamp);
-      const cleanUrl = formatPath(log.url);
-      const nameInfo = log.nameTag 
-        ? `"${log.nameTag}"${log.objectType ? ` (${log.objectType})` : ''}` 
-        : (log.objectType ? `(${log.objectType})` : '');
-      
-      return `[${time}] ${log.method.padEnd(4)} ${log.status} - ${nameInfo ? nameInfo + ' - ' : ''}${cleanUrl} (${log.duration}ms)`;
-    }).join('\n');
+    const text = copyMode === "surface"
+      ? logs.map(formatSurfaceLog).join('\n')
+      : logs.map(formatDetailedLog).join('\n\n---\n\n');
 
     try {
       await navigator.clipboard.writeText(text);
@@ -445,6 +497,26 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy surface logs", err);
+    }
+  };
+
+  const handleCopyRequest = async (log: LogEntry) => {
+    try {
+      await navigator.clipboard.writeText(formatCurlRequest(log));
+      setCopiedRequestId(log.id);
+      setTimeout(() => setCopiedRequestId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy request", err);
+    }
+  };
+
+  const handleCopyResponse = async (log: LogEntry) => {
+    try {
+      await navigator.clipboard.writeText(formatResponseJson(log));
+      setCopiedResponseId(log.id);
+      setTimeout(() => setCopiedResponseId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy response", err);
     }
   };
 
@@ -540,10 +612,28 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
           <div className="flex items-center gap-3">
             {logs.length > 0 && (
               <>
+                <div className="flex items-center rounded-md border border-zinc-200 bg-zinc-100 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setCopyMode("surface")}
+                    className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${copyMode === "surface" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}
+                    title="Copy title-only surface logs"
+                  >
+                    Surface
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCopyMode("full")}
+                    className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${copyMode === "full" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}
+                    title="Copy logs with request, response, and context"
+                  >
+                    Full
+                  </button>
+                </div>
                 <button 
                   onClick={handleCopySurfaceLogs}
                   className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 active:bg-zinc-200 transition-all shadow-sm"
-                  title="Copy all surface-level logs to clipboard"
+                  title={copyMode === "surface" ? "Copy title-only logs" : "Copy full logs with all context"}
                 >
                   {copied ? (
                     <>
@@ -553,7 +643,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                   ) : (
                     <>
                       <Copy className="h-4 w-4 text-zinc-500" />
-                      <span>Copy Logs</span>
+                      <span>{copyMode === "surface" ? "Copy Logs" : "Copy Full"}</span>
                     </>
                   )}
                 </button>
@@ -717,7 +807,12 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                       <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                           <div>
-                            <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                              <button type="button" onClick={() => handleCopyRequest(log)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
+                                {copiedRequestId === log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy request
+                              </button>
+                            </div>
                             <div className="overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
                               <div className="mb-2 text-blue-400">{log.method} {log.url}</div>
                               {log.requestHeaders && Object.entries(log.requestHeaders).map(([k, v]) => (
@@ -731,15 +826,14 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                             </div>
                           </div>
                           <div>
-                            <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-zinc-500">Response</h4>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
+                              <button type="button" onClick={() => handleCopyResponse(log)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
+                                {copiedResponseId === log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy response
+                              </button>
+                            </div>
                             <div className="h-full max-h-[400px] overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
-                              {log.error ? (
-                                <div className="text-red-400">{log.error}</div>
-                              ) : (
-                                <pre className={isError ? "text-red-300" : "text-zinc-300"}>
-                                  {JSON.stringify(log.responseBody, null, 2)}
-                                </pre>
-                              )}
+                              <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(log)}</pre>
                             </div>
                           </div>
                         </div>
@@ -759,6 +853,10 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                   expandedId={expandedId}
                   onToggleCollapsed={toggleCollapsedTreeId}
                   onToggleExpanded={toggleExpandedLog}
+                  onCopyRequest={handleCopyRequest}
+                  onCopyResponse={handleCopyResponse}
+                  copiedRequestId={copiedRequestId}
+                  copiedResponseId={copiedResponseId}
                 />
               ))}
             </div>

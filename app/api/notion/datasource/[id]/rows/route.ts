@@ -31,8 +31,13 @@ export async function GET(request: Request, { params }: Params) {
 async function resolveDataSourceId(token: string, id: string, kind: string | null): Promise<string> {
   if (kind === "data_source") return id;
   if (kind === "database") {
-    const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/database") });
-    return database.data_sources?.[0]?.id ?? database.id;
+    try {
+      const database = await notionFetch<NotionDatabase>(token, `/databases/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/database") });
+      return database.data_sources?.[0]?.id ?? database.id;
+    } catch (error) {
+      if (!isProbeMiss(error)) throw error;
+      return id;
+    }
   }
 
   const dataSource = await notionFetch<any>(token, `/data_sources/${id}`, {}, { tracePath: traceChild(`datasource/${id}`, "resolve/data-source") });

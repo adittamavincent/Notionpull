@@ -83,7 +83,7 @@ export async function GET(request: Request) {
       let columns = Object.keys(properties);
       let selectedColumns: string[] | undefined = undefined;
       let columnDetails: Array<{ id?: string; name: string; visible?: boolean; width?: number }> = [];
-      let views: Array<{ id: string; title?: string; configuration?: any }> = [];
+      let views: Array<{ id: string; title?: string; data_source_id?: string; configuration?: any }> = [];
 
       try {
         const viewList = await notionFetch<any>(token, `/views?database_id=${encodeURIComponent(database.id)}`, {}, { tracePath: traceChild(traceRoot, "views") });
@@ -96,6 +96,7 @@ export async function GET(request: Request) {
             return {
               id: view.id,
               title: view.title ?? view.name ?? (viewType && view[viewType]?.title) ?? (viewType && view[viewType]?.name),
+              data_source_id: view.data_source_id,
               configuration
             };
           } catch {
@@ -112,6 +113,15 @@ export async function GET(request: Request) {
       }
       if (!activeView && views.length > 0) {
         activeView = views[0];
+      }
+
+      const viewDataSourceId = activeView?.data_source_id;
+      if (viewDataSourceId && viewDataSourceId !== (database.data_sources?.[0]?.id ?? database.id)) {
+        try {
+          dataSource = await notionFetch<any>(token, `/data_sources/${viewDataSourceId}`, {}, { tracePath: traceChild(traceRoot, `view-data-source/${viewDataSourceId}`) });
+        } catch {
+          dataSource = database;
+        }
       }
 
       if (activeView && activeView.configuration?.properties) {
@@ -162,8 +172,8 @@ export async function GET(request: Request) {
         type: "database",
         id: database.id,
         title: databaseTitle(database),
-        dataSourceId: database.data_sources?.[0]?.id ?? database.id,
-        dataSourceName: database.data_sources?.[0]?.name,
+        dataSourceId: viewDataSourceId ?? database.data_sources?.[0]?.id ?? database.id,
+        dataSourceName: dataSource?.name ?? database.data_sources?.find((source: any) => source.id === viewDataSourceId)?.name ?? database.data_sources?.[0]?.name,
         columns,
         selectedColumns,
         viewId: viewId ?? undefined,
