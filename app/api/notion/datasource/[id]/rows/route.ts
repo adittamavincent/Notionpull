@@ -8,16 +8,19 @@ export async function GET(request: Request, { params }: Params) {
     const token = tokenFromRequest(request);
     const cursor = new URL(request.url).searchParams.get("cursor");
     const kind = new URL(request.url).searchParams.get("kind");
+    const viewId = new URL(request.url).searchParams.get("viewId");
     const traceRoot = `datasource/${params.id}`;
     const body: Record<string, unknown> = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
     let rows: any;
     try {
       const dataSourceId = await resolveDataSourceId(token, params.id, kind);
-      rows = await notionFetch<any>(token, `/data_sources/${dataSourceId}/query`, {
-        method: "POST",
-        body: JSON.stringify(body)
-      }, { tracePath: traceChild(traceRoot, "query") });
+      rows = viewId
+        ? await queryViewRows(token, viewId, body, traceChild(traceRoot, `view/${viewId}`))
+        : await notionFetch<any>(token, `/data_sources/${dataSourceId}/query`, {
+            method: "POST",
+            body: JSON.stringify(body)
+          }, { tracePath: traceChild(traceRoot, "query") });
     } catch (err: any) {
       throw err;
     }
@@ -26,6 +29,48 @@ export async function GET(request: Request, { params }: Params) {
   } catch (error) {
     return notionErrorResponse(error);
   }
+}
+
+async function queryViewRows(token: string, viewId: string, body: Record<string, unknown>, traceRoot: string): Promise<any> {
+  const createBody = { page_size: body.page_size, start_cursor: body.start_cursor };
+  const created = await notionFetch<any>(token, `/views/${viewId}/queries`, {
+    method: "POST",
+    body: JSON.stringify(createBody)
+  }, { tracePath: traceChild(traceRoot, "create-query") });
+
+  if (Array.isArray(created?.results)) return normalizeRowsResponse(created);
+
+  const queryId = created?.query_id ?? created?.id;
+  if (!queryId) return normalizeRowsResponse(created);
+
+  const qs = new URLSearchParams({ page_size: String(body.page_size ?? 100) });
+  if (body.start_cursor) qs.set("start_cursor", String(body.start_cursor));
+
+  const paths = [
+    `/views/${viewId}/queries/${queryId}/results?${qs.toString()}`,
+    `/views/${viewId}/queries/${queryId}?${qs.toString()}`
+  ];
+
+  let lastError: unknown = null;
+  for (const path of paths) {
+    try {
+      const results = await notionFetch<any>(token, path, {}, { tracePath: traceChild(traceRoot, "query-results") });
+      return normalizeRowsResponse({ ...results, query_id: queryId, request_status: results?.request_status ?? created?.request_status });
+    } catch (error) {
+      lastError = error;
+      if (!isProbeMiss(error)) throw error;
+    }
+  }
+  throw lastError;
+}
+
+function normalizeRowsResponse(response: any): any {
+  return {
+    ...response,
+    results: response?.results ?? [],
+    has_more: Boolean(response?.has_more),
+    next_cursor: response?.next_cursor ?? null,
+  };
 }
 
 async function resolveDataSourceId(token: string, id: string, kind: string | null): Promise<string> {

@@ -49,7 +49,7 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
     const dbItem = item as DatabaseExportItem;
     if (dbItem.id && renderedDbIds.has(dbItem.id)) return null;
     if (dbItem.id) renderedDbIds.add(dbItem.id);
-    return databaseToMarkdown(dbItem, options);
+    return databaseToXml(dbItem, options);
   }).filter(Boolean);
 
   return [...pageOutputs, ...dbOutputs].join("\n\n---\n\n");
@@ -63,95 +63,86 @@ function getHeadingLevel(depth?: number) {
   return Math.min(6, (depth ?? 0) + 2);
 }
 
-function databaseToMarkdown(item: DatabaseExportItem, options: ExportOptions): string {
+function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string {
   const columns = databaseColumns(item);
-  const hLevel = getHeadingLevel(item.depth);
-  const hMain = "#".repeat(hLevel);
-  
-  const head = [`${hMain} ${item.title}`];
+  const attrs = [`title="${escapeXmlAttribute(item.title)}"`];
+  if (item.id) attrs.unshift(`id="${escapeXmlAttribute(item.id)}"`);
+  attrs.push(`kind="${escapeXmlAttribute(item.kind)}"`);
+  attrs.push(`display="${item.rows.length === 1 ? "list" : "table"}"`);
+  if (item.depth !== undefined) attrs.push(`depth="${item.depth}"`);
 
-  if (item.id) {
-    head.push("");
-    head.push(`**Database ID:** ${item.id}`);
-  }
-
+  const lines = [`<database ${attrs.join(" ")}>`];
+  lines.push("<meta>");
+  if (item.id) lines.push(`<id>${escapeXmlText(item.id)}</id>`);
   const viewLine = getViewLine(item);
-  if (viewLine) {
-    head.push("");
-    head.push(`**View:** ${viewLine}`);
+  if (viewLine) lines.push(`<view id="${escapeXmlAttribute(item.viewId ?? "")}" title="${escapeXmlAttribute(item.viewTitle ?? "")}">${escapeXmlText(viewLine)}</view>`);
+  lines.push(`<row-count>${item.rows.length}</row-count>`);
+  lines.push("</meta>");
+
+  lines.push("<schema>");
+  for (const column of columns) {
+    lines.push(columnSchemaXml(item, column));
+  }
+  lines.push("</schema>");
+
+  if (!columns.length || item.rows.length === 0) {
+    lines.push("<rows />");
+    lines.push("</database>");
+    return lines.join("\n");
   }
 
-  const mergedColumnsLine = getMergedColumnsLine(item);
-  if (mergedColumnsLine) {
-    head.push("");
-    head.push(`**Columns:** ${mergedColumnsLine}`);
+  lines.push(`<rows display="${item.rows.length === 1 ? "list" : "table"}">`);
+  for (const row of item.rows) {
+    lines.push(rowToXml(row, columns, options));
   }
-
-  if (!columns.length) return head.join("\n") + "\n\n_Empty_";
-  
-  head.push("");
-  if (item.rows.length === 0) {
-    head.push("_Empty_");
-  } else if (item.rows.length > 1) {
-    head.push(`| ${columns.map(escapeMarkdown).join(" | ")} |`);
-    head.push(`| ${columns.map(() => "---").join(" | ")} |`);
-    for (const row of item.rows) {
-      head.push(`| ${columns.map((column) => escapeMarkdown(propertyValue(row.properties?.[column], options))).join(" | ")} |`);
-    }
-  } else {
-    // Exactly 1 row. Render beautifully as a list of bulleted properties under the entry name
-    const row = item.rows[0];
-    const rowTitle = pageTitle(row) || "Untitled Entry";
-    head.push(`**Entry:** ${rowTitle}`);
-    for (const column of columns) {
-      const val = propertyValue(row.properties?.[column], options);
-      head.push(`- **${column}:** ${val}`);
-    }
-  }
-  return head.join("\n");
+  lines.push("</rows>");
+  lines.push("</database>");
+  return lines.join("\n");
 }
 
-function getMergedColumnsLine(item: DatabaseExportItem): string {
-  const columns = databaseColumns(item);
-  const parts: string[] = [];
-  
-  for (const columnName of columns) {
-    // 1. Get property details (type, options, description)
-    const prop = item.properties?.[columnName];
-    let propInfoStr = "";
-    if (prop) {
-      let columnInfo = "";
-      if (prop.type === "select" && prop.select?.options?.length > 0) {
-        columnInfo = `${prop.select.options.map((o: any) => o.name).join(",")}`;
-      } else if (prop.type === "multi_select" && prop.multi_select?.options?.length > 0) {
-        columnInfo = `${prop.multi_select.options.map((o: any) => o.name).join(",")}`;
-      } else if (prop.type === "status" && prop.status?.options?.length > 0) {
-        columnInfo = `${prop.status.options.map((o: any) => o.name).join(",")}`;
-      }
+function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
+  const prop = item.properties?.[columnName];
+  const detail = item.columnDetails?.find((d) => d.name === columnName);
+  const attrs = [
+    `name="${escapeXmlAttribute(columnName)}"`,
+    `type="${escapeXmlAttribute(prop?.type ?? "unknown")}"`,
+    `visible="${detail?.visible === false ? "false" : "true"}"`
+  ];
+  if (prop?.id) attrs.push(`property-id="${escapeXmlAttribute(prop.id)}"`);
+  if (detail?.width !== undefined) attrs.push(`width="${detail.width}"`);
 
-      const infoPart = columnInfo ? `: ${columnInfo}` : "";
-      const descPart = prop.description ? ` (${prop.description})` : "";
-      propInfoStr = ` (${prop.type}${infoPart}${descPart})`;
-    }
+  const options = propertyOptions(prop);
+  const desc = prop?.description ? `<description>${escapeXmlText(prop.description)}</description>` : "";
+  if (!options.length && !desc) return `<property ${attrs.join(" ")} />`;
 
-    // 2. Get visibility/width from columnDetails
-    const detail = item.columnDetails?.find((d) => d.name === columnName);
-    let stateStr = "visible";
-    let widthStr = "";
-    if (detail) {
-      if (detail.visible === false) {
-        stateStr = "hidden";
-      }
-      if (detail.width !== undefined) {
-        widthStr = `, ${detail.width}px`;
-      }
-    }
-    const layoutStr = ` [${stateStr}${widthStr}]`;
-
-    parts.push(`\`${columnName}\`${propInfoStr}${layoutStr}`);
+  const lines = [`<property ${attrs.join(" ")}>`];
+  if (desc) lines.push(desc);
+  if (options.length) {
+    lines.push("<options>");
+    for (const option of options) lines.push(`<option>${escapeXmlText(option)}</option>`);
+    lines.push("</options>");
   }
+  lines.push("</property>");
+  return lines.join("\n");
+}
 
-  return parts.join("; ");
+function propertyOptions(prop: any): string[] {
+  if (!prop) return [];
+  if (prop.type === "select") return prop.select?.options?.map((o: any) => o.name).filter(Boolean) ?? [];
+  if (prop.type === "multi_select") return prop.multi_select?.options?.map((o: any) => o.name).filter(Boolean) ?? [];
+  if (prop.type === "status") return prop.status?.options?.map((o: any) => o.name).filter(Boolean) ?? [];
+  return [];
+}
+
+function rowToXml(row: NotionPage, columns: string[], options: ExportOptions): string {
+  const lines = [`<row id="${escapeXmlAttribute(row.id)}" title="${escapeXmlAttribute(pageTitle(row) || "Untitled Entry")}">`];
+  for (const column of columns) {
+    const prop = row.properties?.[column];
+    const type = prop?.type ?? "unknown";
+    lines.push(`<property name="${escapeXmlAttribute(column)}" type="${escapeXmlAttribute(type)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
+  }
+  lines.push("</row>");
+  return lines.join("\n");
 }
 
 function getViewLine(item: DatabaseExportItem): string {
@@ -285,7 +276,7 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
         if (dbItem) {
           renderedDbIds.add(dbId);
           const xml = `<db id="${escapeXmlAttribute(dbId)}" t="${escapeXmlAttribute(dbItem.title)}" />`;
-          const content = databaseToMarkdown(dbItem, options);
+          const content = databaseToXml(dbItem, options);
           return `${content}\n\n${xml}`;
         }
       }

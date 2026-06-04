@@ -23,6 +23,10 @@ export type DetectedObject = {
 export type NotionDatabaseView = {
   id: string;
   title?: string;
+  type?: string;
+  data_source_id?: string;
+  database_id?: string;
+  configuration?: any;
 };
 
 export type NotionColumnDetail = {

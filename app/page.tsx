@@ -279,10 +279,10 @@ export default function Page() {
       treeCache.current.clear(); // Clear tree structure cache on refresh
     }
     
-    const cacheKey = treeCacheKey(object.id, currentDepth);
+    const cacheKey = treeCacheKey(object.id, currentDepth, object.viewId);
     
     if (!forceRefresh) {
-      const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth);
+      const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth, object.viewId);
       if (cached) {
         treeCache.current.set(cacheKey, cached);
         setNodes([cached]);
@@ -361,7 +361,7 @@ export default function Page() {
 
   function handleRefresh() {
     if (!detected) return;
-    const cacheKey = treeCacheKey(detected.id, depth);
+    const cacheKey = treeCacheKey(detected.id, depth, detected.viewId);
     treeCache.current.delete(cacheKey);
     void loadTree(detected, depth, true);
   }
@@ -439,7 +439,7 @@ export default function Page() {
     
     // Also update cache so it persists across depth changes
     if (detected) {
-      const cacheKey = treeCacheKey(detected.id, depth);
+      const cacheKey = treeCacheKey(detected.id, depth, detected.viewId);
       if (treeCache.current.has(cacheKey)) {
         treeCache.current.set(cacheKey, updatedNodes[0]);
       }
@@ -486,8 +486,8 @@ export default function Page() {
           const unitsPerBatch = Math.floor(UNITS_PER_NODE / (estimatedBatches + 1));
 
           const rowSourceKind = resolveRowSourceKind(node.id, database.dataSourceId, node.kind);
-          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}:${rowSourceKind}`, () => 
-            fetchAllRows(activeToken.token, database.dataSourceId, rowSourceKind, (count) => {
+          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}:${rowSourceKind}:${node.viewId ?? ""}`, () => 
+            fetchAllRows(activeToken.token, database.dataSourceId, rowSourceKind, node.viewId, (count) => {
                 const batchesDone = Math.floor(count / 100);
                 const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
                 setExportCurrent(progress);
@@ -534,7 +534,7 @@ export default function Page() {
                 if (block.type === "child_database") {
                   const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`, { signal: controller.signal, onStatus: setExportStatus });
                   const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
-                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, undefined, { signal: controller.signal, onStatus: setExportStatus }));
+                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}:${dbTreeNode?.viewId ?? ""}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, dbTreeNode?.viewId, undefined, { signal: controller.signal, onStatus: setExportStatus }));
                   
                   // Filter nested database rows based on whether their tree node row IDs are selected
                   const dbTreeNode = flatNodes.find(n => n.id === block.id);
@@ -893,23 +893,23 @@ export default function Page() {
 
 // Data Fetching logic (kept same except TreeNodeData modifications)
 
-function treeCacheKey(id: string, depth: DepthOption): string {
-  return `${id}-${depth}`;
+function treeCacheKey(id: string, depth: DepthOption, viewId?: string): string {
+  return `${id}-${viewId ?? "default"}-${depth}`;
 }
 
 function depthValue(depth: DepthOption): number {
   return depth === "All" ? Infinity : Number(depth);
 }
 
-function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption): TreeNodeData | null {
-  const exact = cache.get(treeCacheKey(rootId, depth));
+function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption, viewId?: string): TreeNodeData | null {
+  const exact = cache.get(treeCacheKey(rootId, depth, viewId));
   if (exact) return exact;
 
   const requestedDepth = depthValue(depth);
   for (const option of depthOptions) {
     if (depthValue(option) <= requestedDepth) continue;
 
-    const deeperTree = cache.get(treeCacheKey(rootId, option));
+    const deeperTree = cache.get(treeCacheKey(rootId, option, viewId));
     if (deeperTree) return cloneTreeToDepth(deeperTree, requestedDepth);
   }
 
@@ -995,7 +995,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       if (node.depth + 1 > maxDepth) return node;
       
       if (!node.children) {
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.depth + 1, node.id, memo, node.previewColumns);
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, node.previewColumns);
         node.children = rows;
       }
       
@@ -1007,8 +1007,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[]): Promise<TreeNodeData[]> {
-  const rows = await memoRows(token, dataSourceId, kind, memo);
+async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[]): Promise<TreeNodeData[]> {
+  const rows = await memoRows(token, dataSourceId, kind, viewId, memo);
   return rows.map((row) => {
     let title = "";
     if (previewColumns && previewColumns.length > 0) {
@@ -1088,8 +1088,8 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
   ));
 }
 
-function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", memo: BuildMemo): Promise<NotionPage[]> {
-  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}`, () => fetchAllRows(token, dataSourceId, kind, undefined, { signal: memo.signal }));
+function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo): Promise<NotionPage[]> {
+  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -1118,12 +1118,14 @@ let notionClientQueue: Promise<void> = Promise.resolve();
 let notionClientBlockedUntil = 0;
 const NOTION_MIN_REQUEST_SPACING_MS = 375;
 
-async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", onProgress?: (count: number) => void, options: ApiFetchOptions = {}): Promise<NotionPage[]> {
+async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId?: string, onProgress?: (count: number) => void, options: ApiFetchOptions = {}): Promise<NotionPage[]> {
   const rows: NotionPage[] = [];
   let cursor: string | null = null;
   do {
-    const qs: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows${qs}${qs ? "&" : "?"}kind=${encodeURIComponent(kind)}`, options);
+    const qs = new URLSearchParams({ kind });
+    if (cursor) qs.set("cursor", cursor);
+    if (viewId) qs.set("viewId", viewId);
+    const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows?${qs.toString()}`, options);
     rows.push(...body.results);
     cursor = body.has_more ? body.next_cursor : null;
     if (onProgress) onProgress(rows.length);
