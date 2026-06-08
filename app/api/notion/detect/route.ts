@@ -133,7 +133,11 @@ export async function GET(request: Request) {
           const configuration = activeView.configuration;
           if (configuration?.properties) {
             const propIdToName = Object.entries(properties).reduce((acc: any, [name, prop]: [string, any]) => {
-              acc[prop.id] = name;
+              if (prop?.id) {
+                const decodedId = decodeURIComponent(prop.id);
+                acc[decodedId] = name;
+                acc[prop.id] = name;
+              }
               return acc;
             }, {});
             
@@ -142,7 +146,11 @@ export async function GET(request: Request) {
               const propertyId = entry?.property_id ?? entry?.propertyId;
               const propertyName = entry?.property_name ?? entry?.propertyName ?? entry?.name;
 
-              if (propertyId && propIdToName[propertyId]) return propIdToName[propertyId];
+              if (propertyId) {
+                const decodedId = decodeURIComponent(propertyId);
+                if (propIdToName[decodedId]) return propIdToName[decodedId];
+                if (propIdToName[propertyId]) return propIdToName[propertyId];
+              }
               if (propertyName && properties[propertyName]) return propertyName;
               if (propertyName) return propertyName;
               return undefined;
@@ -165,7 +173,7 @@ export async function GET(request: Request) {
             const missing = columns.filter((c) => !viewPropNames.includes(c));
             
             columns = [...viewPropNames, ...missing];
-            selectedColumns = viewVisibleNames.length > 0 ? viewVisibleNames : undefined;
+            selectedColumns = columns;
           }
         } catch (err) {
           console.error("Failed to process view configuration:", err);
@@ -185,7 +193,7 @@ export async function GET(request: Request) {
         isLinkedDatabase,
         columns,
         selectedColumns,
-        viewId: viewId ?? undefined,
+        viewId: viewId ?? activeView?.id ?? undefined,
         views,
         columnDetails,
         properties

@@ -276,6 +276,8 @@ export default function Page() {
     return () => clearInterval(timer);
   }, [lastFetch]);
 
+
+
   function refreshTokens() {
     const nextTokens = getTokens();
     const nextActive = getActiveTokenLabel() ?? nextTokens[0]?.label ?? null;
@@ -440,7 +442,16 @@ export default function Page() {
         });
       }));
 
-      // Reconcile selection: If a node was already selected, make sure its new children follow the selection
+      const isIncludedInNotion = (n: TreeNodeData): boolean => {
+        const props = n.page?.properties;
+        if (!props) return false;
+        const includeProp = Object.entries(props).find(([name, prop]: [string, any]) => 
+          name.toLowerCase() === "include" && prop?.type === "checkbox" && prop.checkbox === true
+        );
+        return !!includeProp;
+      };
+
+      // Reconcile selection: If a node was already selected, or has Include: true, make sure its children follow
       setSelected((prev) => {
         const next = new Set(prev);
         const seen = new Set<string>();
@@ -449,7 +460,8 @@ export default function Page() {
           if (seen.has(n.id)) return;
           seen.add(n.id);
 
-          const isSelected = parentSelected || next.has(n.id);
+          const hasIncludeProperty = isIncludedInNotion(n);
+          const isSelected = parentSelected || next.has(n.id) || hasIncludeProperty;
           if (isSelected) next.add(n.id);
 
           for (const child of n.children ?? []) {

@@ -76,14 +76,22 @@ export async function GET(request: Request, { params }: Params) {
     const activeViewConfig = activeView?.configuration;
     const viewProperties = activeViewConfig?.properties ?? [];
     const propIdToName = Object.entries(properties).reduce((acc: Record<string, string>, [name, prop]: [string, any]) => {
-      if (prop?.id) acc[prop.id] = name;
+      if (prop?.id) {
+        const decodedId = decodeURIComponent(prop.id);
+        acc[decodedId] = name;
+        acc[prop.id] = name;
+      }
       return acc;
     }, {});
     const resolvePropertyName = (entry: any): string | undefined => {
       const propertyId = entry?.property_id ?? entry?.propertyId;
       const propertyName = entry?.property_name ?? entry?.propertyName ?? entry?.name;
 
-      if (propertyId && propIdToName[propertyId]) return propIdToName[propertyId];
+      if (propertyId) {
+        const decodedId = decodeURIComponent(propertyId);
+        if (propIdToName[decodedId]) return propIdToName[decodedId];
+        if (propIdToName[propertyId]) return propIdToName[propertyId];
+      }
       if (propertyName && properties[propertyName]) return propertyName;
       if (propertyName) return propertyName;
       return undefined;
@@ -123,7 +131,7 @@ export async function GET(request: Request, { params }: Params) {
       activeView,
       columnDetails,
       columns,
-      selectedColumns: visibleViewColumns.length > 0 ? visibleViewColumns : undefined,
+      selectedColumns: columns,
       properties
     });
   } catch (error) {
