@@ -45,6 +45,7 @@ export default function Page() {
   const [showRelationIds, setShowRelationIds] = useState(false);
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
   const [maxChildren, setMaxChildren] = useState<number>(5);
+  const [resetLog, setResetLog] = useState(true);
 
   // Load from localStorage on mount to avoid hydration mismatch
   useEffect(() => {
@@ -60,6 +61,10 @@ export default function Page() {
       const savedMaxChildren = localStorage.getItem("notionpull_max_children");
       if (savedMaxChildren !== null) {
         setMaxChildren(Number(savedMaxChildren));
+      }
+      const savedResetLog = localStorage.getItem("notionpull_reset_log");
+      if (savedResetLog !== null) {
+        setResetLog(savedResetLog === "true");
       }
     } catch {}
   }, []);
@@ -82,6 +87,13 @@ export default function Page() {
     setMaxChildren(val);
     try {
       localStorage.setItem("notionpull_max_children", String(val));
+    } catch {}
+  };
+
+  const handleResetLogChange = (val: boolean) => {
+    setResetLog(val);
+    try {
+      localStorage.setItem("notionpull_reset_log", String(val));
     } catch {}
   };
 
@@ -244,6 +256,15 @@ export default function Page() {
   async function submitUrl(event: FormEvent) {
     event.preventDefault();
     if (!activeToken || !url.trim()) return;
+
+    if (resetLog) {
+      try {
+        await fetch("/api/notion/debug", { method: "DELETE" });
+      } catch (err) {
+        console.error("Failed to reset logs on fetch:", err);
+      }
+    }
+
     treeAbortRef.current?.abort();
     const controller = new AbortController();
     treeAbortRef.current = controller;
@@ -643,13 +664,28 @@ export default function Page() {
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
-              Debug
-            </button>
-            <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setManagerOpen(true)}>
-              Tokens
-            </button>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer select-none group">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={resetLog}
+                  onChange={(e) => handleResetLogChange(e.target.checked)}
+                />
+                <div className={`w-8 h-4 rounded-full transition-colors duration-200 ease-in-out ${resetLog ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                <div className={`absolute left-0.5 top-0.5 bg-white w-3 h-3 rounded-full shadow transition-transform duration-200 ease-in-out ${resetLog ? "translate-x-4" : "translate-x-0"}`} />
+              </div>
+              <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Reset Log on Fetch</span>
+            </label>
+            <div className="flex gap-2">
+              <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
+                Debug
+              </button>
+              <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setManagerOpen(true)}>
+                Tokens
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -688,16 +724,14 @@ export default function Page() {
                   {error && <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
                 </div>
                 
-                <div className="flex flex-wrap items-center gap-6">
+                <div className="flex flex-wrap items-center gap-4">
                   {/* Before Fetch Settings */}
-                  <div className={`flex flex-wrap items-center gap-4 ${detected ? "border-r border-zinc-200 pr-6" : ""}`}>
-                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">Before Fetch</span>
-                    
+                  <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-zinc-500">Max DB Children</span>
                       <input
                         type="number"
-                        className="w-16 rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                        className="w-16 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
                         value={maxChildren}
                         onChange={(e) => handleMaxChildrenChange(Math.max(0, parseInt(e.target.value) || 0))}
                         min="0"
@@ -709,7 +743,7 @@ export default function Page() {
 
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-zinc-500">Depth</span>
-                      <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
+                      <div className="flex rounded-md border border-zinc-300 bg-white p-0.5 shadow-sm">
                         {depthOptions.map((option) => (
                           <button
                             key={option}
@@ -748,9 +782,7 @@ export default function Page() {
 
                   {/* After Fetch Settings */}
                   {detected && (
-                    <div className="flex flex-wrap items-center gap-4">
-                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">After Fetch</span>
-                      
+                    <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
                       <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                         <div className="relative">
                           <input
