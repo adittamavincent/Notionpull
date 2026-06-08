@@ -76,7 +76,7 @@ function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string
   if (item.id) lines.push(`<id>${escapeXmlText(item.id)}</id>`);
   const viewLine = getViewLine(item);
   if (viewLine) lines.push(`<view id="${escapeXmlAttribute(item.viewId ?? "")}" title="${escapeXmlAttribute(item.viewTitle ?? "")}">${escapeXmlText(viewLine)}</view>`);
-  lines.push(`<row-count>${item.rows.length}</row-count>`);
+  lines.push(`<page-count>${item.rows.length}</page-count>`);
   lines.push("</meta>");
 
   lines.push("<schema>");
@@ -86,16 +86,16 @@ function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string
   lines.push("</schema>");
 
   if (!columns.length || item.rows.length === 0) {
-    lines.push("<rows />");
+    lines.push("<pages />");
     lines.push("</database>");
     return lines.join("\n");
   }
 
-  lines.push(`<rows display="table">`);
+  lines.push(`<pages display="table">`);
   for (const row of item.rows) {
-    lines.push(rowToXml(row, columns, options));
+    lines.push(pageRowToXml(row, columns, options));
   }
-  lines.push("</rows>");
+  lines.push("</pages>");
   lines.push("</database>");
   return lines.join("\n");
 }
@@ -134,14 +134,14 @@ function propertyOptions(prop: any): string[] {
   return [];
 }
 
-function rowToXml(row: NotionPage, columns: string[], options: ExportOptions): string {
-  const lines = [`<row id="${escapeXmlAttribute(row.id)}" title="${escapeXmlAttribute(pageTitle(row) || "Untitled Entry")}">`];
+function pageRowToXml(row: NotionPage, columns: string[], options: ExportOptions): string {
+  const lines = [`<page id="${escapeXmlAttribute(row.id)}" title="${escapeXmlAttribute(pageTitle(row) || "Untitled Entry")}">`];
   for (const column of columns) {
     const prop = row.properties?.[column];
     const type = prop?.type ?? "unknown";
     lines.push(`<property name="${escapeXmlAttribute(column)}" type="${escapeXmlAttribute(type)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
   }
-  lines.push("</row>");
+  lines.push("</page>");
   return lines.join("\n");
 }
 
@@ -177,11 +177,11 @@ function pageToXml(item: PageExportItem, options: ExportOptions, dbById?: Map<st
   const lines = [`<page ${attributes.join(" ")}>`];
 
   if (item.includeProperties !== false && item.page?.properties && Object.keys(item.page.properties).length > 0) {
-    lines.push("<props>");
+    lines.push("<properties>");
     for (const [name, prop] of Object.entries(item.page.properties)) {
-      lines.push(`<p n="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</p>`);
+      lines.push(`<property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
     }
-    lines.push("</props>");
+    lines.push("</properties>");
   }
 
   const blocks = item.blocks?.map((b) => blockToXml(b, dbById, renderedDbIds, options)).filter(Boolean) ?? [];
@@ -275,14 +275,14 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
         const dbItem = dbById.get(dbId);
         if (dbItem) {
           renderedDbIds.add(dbId);
-          const xml = `<db id="${escapeXmlAttribute(dbId)}" t="${escapeXmlAttribute(dbItem.title)}" />`;
+          const xml = `<block type="child_database" id="${escapeXmlAttribute(dbId)}" title="${escapeXmlAttribute(dbItem.title)}" />`;
           const content = databaseToXml(dbItem, options);
           return `${content}\n\n${xml}`;
         }
       }
-      return `<db id="${escapeXmlAttribute(b.id)}" t="${escapeXmlAttribute(b.child_database?.title ?? "Untitled db")}" />`;
+      return `<block type="child_database" id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_database?.title ?? "Untitled db")}" />`;
     case "child_page":
-      return `<link id="${escapeXmlAttribute(b.id)}" t="${escapeXmlAttribute(b.child_page?.title ?? "Untitled page")}" />`;
+      return `<block type="child_page" id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_page?.title ?? "Untitled page")}" />`;
     default:
       return "";
   }
