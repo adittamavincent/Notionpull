@@ -29,6 +29,24 @@ const nextConfig = {
           chunkIds: "deterministic",
         };
       }
+
+      // LocatorJS: inject source locations via webpack loader instead of babel.
+      // This keeps SWC active for Fast Refresh while still enabling click-to-source.
+      if (!isServer) {
+        config.module.rules.push({
+          test: /\.(jsx?|tsx?)$/,
+          exclude: /node_modules/,
+          enforce: "pre",
+          use: [
+            {
+              loader: "@locator/webpack-loader",
+              options: {
+                env: "development",
+              },
+            },
+          ],
+        });
+      }
     }
     return config;
   },
