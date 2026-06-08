@@ -103,11 +103,16 @@ export async function GET(request: Request, { params }: Params) {
       ? [...orderedViewColumns, ...Object.keys(properties).filter((column) => !orderedViewColumns.includes(column))]
       : Object.keys(properties);
     
+    const isLinkedDatabase = activeView?.data_source_id
+      ? !database.data_sources?.some((ds: any) => ds.id === activeView.data_source_id)
+      : (!database.data_sources || database.data_sources.length === 0);
+
     return Response.json({
       id: database.id,
       title: isDataSource ? (database.name ?? "Untitled data source") : databaseTitle(database),
       dataSourceId,
       dataSourceName,
+      isLinkedDatabase,
       viewId: activeView?.id ?? viewId ?? undefined,
       views,
       activeView,

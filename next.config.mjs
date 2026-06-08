@@ -8,8 +8,15 @@ const nextConfig = {
   webpack: (config, { dev }) => {
     if (dev) {
       config.watchOptions = {
-        aggregateTimeout: 300,
+        aggregateTimeout: 2000,
         poll: false,
+        ignored: [
+          "**/node_modules/**",
+          "**/.next/**",
+          "**/.git/**",
+          "**/out/**",
+          "**/public/**",
+        ],
       };
     }
     return config;

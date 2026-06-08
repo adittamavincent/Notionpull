@@ -43,6 +43,7 @@ export default function Page() {
   const [error, setError] = useState("");
 
   const [showRelationIds, setShowRelationIds] = useState(false);
+  const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
 
   // Load from localStorage on mount to avoid hydration mismatch
   useEffect(() => {
@@ -51,6 +52,10 @@ export default function Page() {
       if (saved !== null) {
         setShowRelationIds(saved === "true");
       }
+      const savedLinked = localStorage.getItem("notionpull_fetch_linked_children");
+      if (savedLinked !== null) {
+        setFetchLinkedChildren(savedLinked === "true");
+      }
     } catch {}
   }, []);
 
@@ -58,6 +63,13 @@ export default function Page() {
     setShowRelationIds(val);
     try {
       localStorage.setItem("notionpull_show_relation_ids", String(val));
+    } catch {}
+  };
+
+  const handleFetchLinkedChildrenChange = (val: boolean) => {
+    setFetchLinkedChildren(val);
+    try {
+      localStorage.setItem("notionpull_fetch_linked_children", String(val));
     } catch {}
   };
 
@@ -311,13 +323,15 @@ export default function Page() {
         dataSourceName: object.dataSourceName,
         columns: object.columns,
         selectedColumns: object.selectedColumns,
-        properties: object.properties
+        properties: object.properties,
+        isLinkedDatabase: object.isLinkedDatabase
       };
       const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
         pageChildren: pageChildrenCache.current,
         databases: databaseCache.current,
         rows: rowsCache.current,
         showIdForRelationRollup: showRelationIds,
+        fetchLinkedChildren,
         signal: controller.signal
       });
       
@@ -684,6 +698,20 @@ export default function Page() {
                     </div>
                     <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 group-hover:text-zinc-600 transition-colors">Relation IDs</span>
                   </label>
+
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={fetchLinkedChildren}
+                        onChange={(e) => handleFetchLinkedChildrenChange(e.target.checked)}
+                      />
+                      <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchLinkedChildren ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                      <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchLinkedChildren ? "translate-x-4" : "translate-x-0"}`} />
+                    </div>
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 group-hover:text-zinc-600 transition-colors">Linked DB Children</span>
+                  </label>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -893,6 +921,7 @@ type BuildMemo = {
   databases: Map<string, Promise<DatabaseResponse>>;
   rows: Map<string, Promise<NotionPage[]>>;
   showIdForRelationRollup?: boolean;
+  fetchLinkedChildren?: boolean;
   signal?: AbortSignal;
 };
 
@@ -949,9 +978,13 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       node.selectedColumns = metadata.selectedColumns ?? node.selectedColumns;
       node.columnDetails = metadata.columnDetails ?? node.columnDetails;
       node.properties = metadata.properties ?? node.properties;
+      node.isLinkedDatabase = metadata.isLinkedDatabase ?? node.isLinkedDatabase;
       const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind as "database" | "data_source");
       
       if (node.depth + 1 > maxDepth) return node;
+
+      const isLinkedDb = !!node.isLinkedDatabase;
+      if (isLinkedDb && !memo.fetchLinkedChildren) return node;
       
       if (!node.children) {
         const previewColumns = node.previewColumns && node.previewColumns.length > 0
@@ -986,7 +1019,7 @@ async function rowNodes(token: string, dataSourceId: string, kind: "database" | 
   });
 }
 
-async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails">> {
+async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails" | "isLinkedDatabase">> {
   if (node.dataSourceId && node.columns && node.properties) {
     return {
       kind: node.kind === "data_source" ? "data_source" : "database",
@@ -997,7 +1030,8 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       columnDetails: node.columnDetails,
       properties: node.properties,
       viewId: node.viewId,
-      selectedColumns: node.selectedColumns
+      selectedColumns: node.selectedColumns,
+      isLinkedDatabase: node.isLinkedDatabase
     };
   }
 
@@ -1013,6 +1047,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       columnDetails: metadata.columnDetails ?? node.columnDetails,
       properties: metadata.properties,
       viewId: metadata.viewId,
+      isLinkedDatabase: (metadata as any).isLinkedDatabase ?? node.isLinkedDatabase,
     };
   } catch {
     const viewQuery = node.viewId ? `&viewId=${encodeURIComponent(node.viewId)}` : "";
@@ -1027,6 +1062,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       columnDetails: detected.columnDetails ?? node.columnDetails,
       properties: detected.properties ?? node.properties,
       viewId: detected.viewId ?? node.viewId,
+      isLinkedDatabase: detected.isLinkedDatabase ?? node.isLinkedDatabase,
     };
   }
 }

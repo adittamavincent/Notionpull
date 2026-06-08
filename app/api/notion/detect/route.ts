@@ -168,12 +168,17 @@ export async function GET(request: Request) {
         }
       }
 
+      const isLinkedDatabase = viewDataSourceId 
+        ? !database.data_sources?.some((ds: any) => ds.id === viewDataSourceId)
+        : (!database.data_sources || database.data_sources.length === 0);
+
       return Response.json({
         type: "database",
         id: database.id,
         title: databaseTitle(database),
         dataSourceId: viewDataSourceId ?? database.data_sources?.[0]?.id ?? database.id,
         dataSourceName: dataSource?.name ?? database.data_sources?.find((source: any) => source.id === viewDataSourceId)?.name ?? database.data_sources?.[0]?.name,
+        isLinkedDatabase,
         columns,
         selectedColumns,
         viewId: viewId ?? undefined,

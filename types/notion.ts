@@ -18,6 +18,7 @@ export type DetectedObject = {
   columns?: string[];
   selectedColumns?: string[];
   properties?: Record<string, any>;
+  isLinkedDatabase?: boolean;
 };
 
 export type NotionDatabaseView = {
@@ -71,6 +72,7 @@ export type TreeNodeData = {
   properties?: Record<string, any>;
   previewColumn?: string;
   previewColumns?: string[];
+  isLinkedDatabase?: boolean;
 };
 
 export type NotionRichText = {

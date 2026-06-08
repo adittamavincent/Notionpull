@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FileText, Database, Rows3, ChevronRight, ChevronDown, Settings2, AlertTriangle, Table } from "lucide-react";
+import { FileText, Database, Rows3, ChevronRight, ChevronDown, Settings2, AlertTriangle, Table, Link } from "lucide-react";
 import type { TreeNodeData } from "@/types/notion";
 
 type Props = {
@@ -47,11 +47,22 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
     }
   }, [selectionState]);
 
-  const getIcon = (kind: string) => {
-    switch (kind) {
+  const getIcon = (node: TreeNodeData) => {
+    const isLinkedDb = (node.kind === "database" || node.kind === "data_source") && !!node.isLinkedDatabase;
+    
+    switch (node.kind as string) {
       case "page": return <FileText className="h-4 w-4 text-zinc-500" />;
       case "database":
-      case "data_source": return <Database className="h-4 w-4 text-blue-500" />;
+      case "data_source": return (
+        <div className="relative flex items-center justify-center">
+          <Database className="h-4 w-4 text-blue-500" />
+          {isLinkedDb && (
+            <div className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200">
+              <Link className="h-1.5 w-1.5 text-zinc-600 stroke-[3]" />
+            </div>
+          )}
+        </div>
+      );
       case "row": return <Rows3 className="h-4 w-4 text-emerald-500" />;
       case "table": return <Table className="h-4 w-4 text-purple-500" />;
       case "table_row": return <Rows3 className="h-4 w-4 text-purple-400" />;
@@ -110,7 +121,7 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
 
       <div className="flex flex-1 items-center gap-2 min-w-0">
         <span className="flex items-center justify-center shrink-0" aria-hidden>
-          {getIcon(node.kind)}
+          {getIcon(node)}
         </span>
 
         <div className="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
@@ -169,7 +180,9 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
         </div>
 
         <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 shrink-0">
-          {node.kind.replace("_", " ")}
+          {(node.kind === "database" || node.kind === "data_source") && !!node.isLinkedDatabase 
+            ? "LINKED DATABASE" 
+            : node.kind.replace("_", " ")}
         </span>
       </div>
 
