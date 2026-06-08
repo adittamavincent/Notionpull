@@ -24,19 +24,28 @@ export interface HistoryItem {
   type: string;
 }
 
+function normalizeUrl(url: string): string {
+  let cleaned = url.trim().toLowerCase();
+  cleaned = cleaned.replace(/^(https?:\/\/)?(www\.)?/, "");
+  cleaned = cleaned.replace(/\/+$/, "");
+  return cleaned;
+}
+
 export default function Page() {
   const [tokens, setTokens] = useState<NotionTokenEntry[]>([]);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
-  
-  const [url, setUrl] = useState("");
+
+  const [urls, setUrls] = useState<string[]>([""]);
+  const [activeInputIndex, setActiveInputIndex] = useState<number>(0);
   const [urlHistory, setUrlHistory] = useState<HistoryItem[]>([]);
-  
-  const [detected, setDetected] = useState<DetectedObject | null>(null);
+
+  const [detectedList, setDetectedList] = useState<DetectedObject[]>([]);
+  const detected = detectedList[0] ?? null;
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  
+
   // Requirement: Default depth 1 (now Surface)
   const [depth, setDepth] = useState<DepthOption>("Surface");
   const [loadingTree, setLoadingTree] = useState(false);
@@ -66,35 +75,35 @@ export default function Page() {
       if (savedResetLog !== null) {
         setResetLog(savedResetLog === "true");
       }
-    } catch {}
+    } catch { }
   }, []);
 
   const handleShowRelationIdsChange = (val: boolean) => {
     setShowRelationIds(val);
     try {
       localStorage.setItem("notionpull_show_relation_ids", String(val));
-    } catch {}
+    } catch { }
   };
 
   const handleFetchLinkedChildrenChange = (val: boolean) => {
     setFetchLinkedChildren(val);
     try {
       localStorage.setItem("notionpull_fetch_linked_children", String(val));
-    } catch {}
+    } catch { }
   };
 
   const handleMaxChildrenChange = (val: number) => {
     setMaxChildren(val);
     try {
       localStorage.setItem("notionpull_max_children", String(val));
-    } catch {}
+    } catch { }
   };
 
   const handleResetLogChange = (val: boolean) => {
     setResetLog(val);
     try {
       localStorage.setItem("notionpull_reset_log", String(val));
-    } catch {}
+    } catch { }
   };
 
   // Reactively update custom preview node titles when showRelationIds changes
@@ -130,7 +139,7 @@ export default function Page() {
       return updateTreeTitles(prevNodes);
     });
   }, [showRelationIds]);
-  
+
   // Database Config State
   const [configNode, setConfigNode] = useState<TreeNodeData | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
@@ -140,7 +149,7 @@ export default function Page() {
   const [exportTotal, setExportTotal] = useState(0);
   const [exportCurrent, setExportCurrent] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
-  
+
   // Export Modal State
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [titleMap, setTitleMap] = useState<Map<string, string>>(new Map());
@@ -163,63 +172,84 @@ export default function Page() {
   // Load URL History from LocalStorage
   useEffect(() => {
     try {
-      const history = JSON.parse(localStorage.getItem("notionpull_history_v2") || "[]");
-      setUrlHistory(history);
-    } catch {}
+      const saved = localStorage.getItem("notionpull_history_v2");
+      if (saved) {
+        const history = JSON.parse(saved);
+        if (Array.isArray(history)) {
+          setUrlHistory(history);
+        }
+      }
+    } catch { }
   }, []);
 
   const saveUrlHistory = (newUrl: string, title?: string, type?: string) => {
     try {
-      if (!title || !type) return;
-      const hist = JSON.parse(localStorage.getItem("notionpull_history_v2") || "[]");
-      const newItem: HistoryItem = { url: newUrl, title, type };
-      const updated = [newItem, ...hist.filter((h: HistoryItem) => h.url !== newUrl)].slice(0, 10);
+      if (!type) return;
+      const displayTitle = (title && title.trim()) ? title.trim() : "Untitled";
+      
+      let hist: HistoryItem[] = [];
+      try {
+        const saved = localStorage.getItem("notionpull_history_v2");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            hist = parsed;
+          }
+        }
+      } catch {}
+
+      const newItem: HistoryItem = { url: newUrl, title: displayTitle, type };
+      const updated = [newItem, ...hist.filter((h: HistoryItem) => normalizeUrl(h.url) !== normalizeUrl(newUrl))].slice(0, 10);
       localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
       setUrlHistory(updated);
-    } catch {}
+    } catch { }
   };
 
-  const removeUrlHistory = (index: number) => {
+  const removeUrlHistory = (url: string) => {
     try {
-      const updated = [...urlHistory];
-      updated.splice(index, 1);
+      const updated = urlHistory.filter((h) => normalizeUrl(h.url) !== normalizeUrl(url));
       localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
       setUrlHistory(updated);
-    } catch {}
+    } catch { }
   };
 
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
+
+  const displayedHistory = useMemo(() => {
+    const inputUrls = new Set(urls.map((u) => normalizeUrl(u)));
+    return urlHistory.filter((item) => !inputUrls.has(normalizeUrl(item.url)));
+  }, [urlHistory, urls]);
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
   // Use unique set of top-level selected nodes to avoid duplicates when parent and child are both selected
   const selectedNodes = useMemo(() => {
     return flatNodes.filter((node) => {
       if (!selected.has(node.id)) return false;
-      
+
       // The root node is always kept
       if (!node.parentId) return true;
-      
+
       const parentIsSelected = selected.has(node.parentId);
-      
+
       // If the parent is selected:
       if (parentIsSelected) {
         // Databases/data sources are always kept to allow parent pages to dynamically embed them
         if (node.kind === "database" || node.kind === "data_source") return true;
-        
+
         // Pages are kept only if they have selected children in the tree (so they are structural, not leaf links)
         if (node.kind === "page") {
           return node.children?.some(child => selected.has(child.id)) ?? false;
         }
-        
+
         // Rows with selected children (blocks inside the row's page) are kept so their content gets exported.
         // Leaf rows (no selected children) are dropped — their data is already in the parent database table.
         if (node.kind === "row") {
           return node.children?.some(child => selected.has(child.id)) ?? false;
         }
-        
+
         // Blocks are always rendered inline under their parent row/page — never export standalone
         return false;
       }
-      
+
       // If the parent is NOT selected, we always keep the node to ensure it gets exported
       return true;
     });
@@ -255,7 +285,10 @@ export default function Page() {
 
   async function submitUrl(event: FormEvent) {
     event.preventDefault();
-    if (!activeToken || !url.trim()) return;
+    if (!activeToken) return;
+
+    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
+    if (!activeUrls.length) return;
 
     if (resetLog) {
       try {
@@ -270,35 +303,53 @@ export default function Page() {
     treeAbortRef.current = controller;
     setError("");
     setLoadingTree(true);
-    setDetected(null);
+    setDetectedList([]);
     setNodes([]);
     setSelected(new Set());
-    
+
     try {
-      const ids = extractNotionIds(url);
-      if (!ids.length) throw new Error("Could not find a valid Notion ID in that URL.");
-      
-      let viewId = "";
-      try {
-        const parsedUrl = new URL(url.trim());
-        viewId = parsedUrl.searchParams.get("v") || "";
-      } catch {}
-      
-      // Try all IDs in parallel for faster detection
-      const results = await Promise.allSettled(
-        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
-      );
-      
-      const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
-      
-      if (successful) {
-        setDetected(successful.value);
-        saveUrlHistory(url.trim(), successful.value.title, successful.value.type);
-        await loadTree(successful.value, depth, true, controller);
+      const detectedResults: DetectedObject[] = [];
+      const errors: string[] = [];
+
+      for (const singleUrl of activeUrls) {
+        const ids = extractNotionIds(singleUrl);
+        if (!ids.length) {
+          errors.push(`Could not find a valid Notion ID in URL: ${singleUrl}`);
+          continue;
+        }
+
+        let viewId = "";
+        try {
+          const parsedUrl = new URL(singleUrl);
+          viewId = parsedUrl.searchParams.get("v") || "";
+        } catch { }
+
+        // Try all IDs in parallel for faster detection
+        const results = await Promise.allSettled(
+          ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
+        );
+
+        const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
+
+        if (successful) {
+          detectedResults.push(successful.value);
+          saveUrlHistory(singleUrl, successful.value.title, successful.value.type);
+        } else {
+          const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+          const errMsg = firstError?.reason ? errorMessage(firstError.reason) : `Could not detect any Notion object in URL: ${singleUrl}`;
+          errors.push(errMsg);
+        }
+      }
+
+      if (errors.length > 0) {
+        setError(errors.join(" | "));
+      }
+
+      if (detectedResults.length > 0) {
+        setDetectedList(detectedResults);
+        await loadTree(detectedResults, depth, true, controller);
       } else {
-        // Find the most relevant error
-        const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
-        throw firstError?.reason || new Error("Could not detect any Notion object in this URL.");
+        setLoadingTree(false);
       }
     } catch (err) {
       if (!isAbortError(err)) setError(errorMessage(err));
@@ -308,8 +359,8 @@ export default function Page() {
     }
   }
 
-  async function loadTree(object: DetectedObject | null = detected, currentDepth: DepthOption = depth, forceRefresh = false, controller?: AbortController) {
-    if (!activeToken || !object) return;
+  async function loadTree(objects: DetectedObject[] = detectedList, currentDepth: DepthOption = depth, forceRefresh = false, controller?: AbortController) {
+    if (!activeToken || !objects.length) return;
     if (!controller) {
       treeAbortRef.current?.abort();
       controller = new AbortController();
@@ -324,74 +375,96 @@ export default function Page() {
       rowsCache.current.clear();
       treeCache.current.clear(); // Clear tree structure cache on refresh
     }
-    
-    const cacheKey = treeCacheKey(object.id, currentDepth, object.viewId);
-    
+
+    // Check cache for ALL objects
     if (!forceRefresh) {
-      const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth, object.viewId);
-      if (cached) {
-        treeCache.current.set(cacheKey, cached);
-        setNodes([cached]);
+      const cachedRoots: TreeNodeData[] = [];
+      let allCached = true;
+      for (const object of objects) {
+        const cached = getCachedTreeForDepth(treeCache.current, object.id, currentDepth, object.viewId);
+        if (cached) {
+          cachedRoots.push(cached);
+        } else {
+          allCached = false;
+          break;
+        }
+      }
+      if (allCached) {
+        setNodes(cachedRoots);
         setLoadingTree(false);
         return;
       }
     }
 
-    // Clear selection if it's a completely new root (not just depth change)
-    if (!detected || detected.id !== object.id) {
+    // Clear selection if it's a completely new root set
+    const currentIds = new Set(objects.map(o => o.id));
+    const prevIds = new Set(detectedList.map(o => o.id));
+    const isDifferentSet = objects.length !== detectedList.length || [...currentIds].some(id => !prevIds.has(id));
+    if (isDifferentSet) {
       setSelected(new Set());
     }
-    
+
     try {
       const maxDepth = depthValue(currentDepth);
-      const rootSeed: TreeNodeData = {
-        id: object.id,
-        title: object.title,
-        kind: object.type,
-        depth: 0,
-        viewId: object.viewId,
-        views: object.views,
-        columnDetails: object.columnDetails,
-        dataSourceId: object.dataSourceId,
-        dataSourceName: object.dataSourceName,
-        columns: object.columns,
-        selectedColumns: object.selectedColumns,
-        properties: object.properties,
-        isLinkedDatabase: object.isLinkedDatabase
-      };
-      const root = await buildNode(activeToken.token, rootSeed, maxDepth, {
-        pageChildren: pageChildrenCache.current,
-        databases: databaseCache.current,
-        rows: rowsCache.current,
-        showIdForRelationRollup: showRelationIds,
-        fetchLinkedChildren,
-        maxChildren,
-        signal: controller.signal
-      });
-      
+
+      const roots = await Promise.all(objects.map(async (object) => {
+        const rootSeed: TreeNodeData = {
+          id: object.id,
+          title: object.title,
+          kind: object.type,
+          depth: 0,
+          viewId: object.viewId,
+          views: object.views,
+          columnDetails: object.columnDetails,
+          dataSourceId: object.dataSourceId,
+          dataSourceName: object.dataSourceName,
+          columns: object.columns,
+          selectedColumns: object.selectedColumns,
+          properties: object.properties,
+          isLinkedDatabase: object.isLinkedDatabase
+        };
+        return buildNode(activeToken.token, rootSeed, maxDepth, {
+          pageChildren: pageChildrenCache.current,
+          databases: databaseCache.current,
+          rows: rowsCache.current,
+          showIdForRelationRollup: showRelationIds,
+          fetchLinkedChildren,
+          maxChildren,
+          signal: controller!.signal
+        });
+      }));
+
       // Reconcile selection: If a node was already selected, make sure its new children follow the selection
       setSelected((prev) => {
         const next = new Set(prev);
         const seen = new Set<string>();
-        
+
         const propagate = (n: TreeNodeData, parentSelected: boolean) => {
           if (seen.has(n.id)) return;
           seen.add(n.id);
-          
+
           const isSelected = parentSelected || next.has(n.id);
           if (isSelected) next.add(n.id);
-          
+
           for (const child of n.children ?? []) {
             propagate(child, isSelected);
           }
         };
 
-        propagate(root, next.has(root.id));
+        for (const root of roots) {
+          propagate(root, next.has(root.id));
+        }
         return next;
       });
 
-      treeCache.current.set(cacheKey, root);
-      setNodes([root]);
+      // Cache each root
+      roots.forEach((root, idx) => {
+        const object = objects[idx];
+        const cacheKey = treeCacheKey(object.id, currentDepth, object.viewId);
+        treeCache.current.set(cacheKey, root);
+      });
+
+      setNodes(roots);
       setLastFetch(new Date());
     } catch (err) {
       if (!isAbortError(err)) setError(errorMessage(err));
@@ -400,6 +473,8 @@ export default function Page() {
       setLoadingTree(false);
     }
   }
+
+
 
 
   function toggleNode(node: TreeNodeData, checked: boolean) {
@@ -433,7 +508,7 @@ export default function Page() {
             ...col,
             visible: selectedColumns.includes(col.name)
           }));
-          
+
           let updatedChildren = n.children;
           if (updatedChildren) {
             updatedChildren = updatedChildren.map(child => {
@@ -453,14 +528,14 @@ export default function Page() {
               return child;
             });
           }
-          
-          return { 
-            ...n, 
-            selectedColumns, 
-            columnDetails: updatedColumnDetails, 
-            previewColumns, 
+
+          return {
+            ...n,
+            selectedColumns,
+            columnDetails: updatedColumnDetails,
+            previewColumns,
             previewColumn: previewColumns?.[0], // Keep for fallback compatibility
-            children: updatedChildren 
+            children: updatedChildren
           };
         }
         if (n.children) {
@@ -469,15 +544,18 @@ export default function Page() {
         return n;
       });
     };
-    
+
     const updatedNodes = updateNode(nodes);
     setNodes(updatedNodes);
-    
+
     // Also update cache so it persists across depth changes
-    if (detected) {
-      const cacheKey = treeCacheKey(detected.id, depth, detected.viewId);
-      if (treeCache.current.has(cacheKey)) {
-        treeCache.current.set(cacheKey, updatedNodes[0]);
+    for (const root of updatedNodes) {
+      const matchedDetected = detectedList.find(d => d.id === root.id);
+      if (matchedDetected) {
+        const cacheKey = treeCacheKey(matchedDetected.id, depth, matchedDetected.viewId);
+        if (treeCache.current.has(cacheKey)) {
+          treeCache.current.set(cacheKey, root);
+        }
       }
     }
   }
@@ -489,26 +567,26 @@ export default function Page() {
     exportAbortRef.current = controller;
     setExporting(true);
     setError("");
-    
+
     // Use a granular scale where each selected node is 100 units
     const UNITS_PER_NODE = 100;
     setExportTotal(selectedNodes.length * UNITS_PER_NODE);
     setExportCurrent(0);
     setExportStatus("Initializing...");
-    
+
     try {
       const items: ExportItem[] = [];
       let baseProgress = 0;
-      
+
       for (const node of selectedNodes) {
         setExportStatus(`Fetching ${node.title}...`);
-        
+
         if (node.error) {
           baseProgress += UNITS_PER_NODE;
           setExportCurrent(baseProgress);
           continue;
         }
-        
+
         if (node.kind === "database" || node.kind === "data_source") {
           let exportRows: NotionPage[] = [];
           if (node.children && node.children.length > 0) {
@@ -516,12 +594,12 @@ export default function Page() {
               .filter((c) => selected.has(c.id) && c.page)
               .map((c) => c.page!);
           }
-          
-          items.push({ 
-            kind: node.kind, 
+
+          items.push({
+            kind: node.kind,
             id: node.id,
-            title: node.title, 
-            rows: exportRows, 
+            title: node.title,
+            rows: exportRows,
             columns: node.columns,
             selectedColumns: node.selectedColumns,
             columnDetails: node.columnDetails,
@@ -533,11 +611,11 @@ export default function Page() {
         } else {
           // Page/Row/Block fetching
           // No hard jump to 50%, let the smooth UI logic handle the perceived progress
-          
+
           let blocks: NotionBlock[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
-              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () => 
+              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () =>
                 apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`, { signal: controller.signal, onStatus: setExportStatus })
               );
               blocks = body.results;
@@ -589,32 +667,32 @@ export default function Page() {
               blocks = [];
             }
           }
-          
+
           const rowAlreadyInSelectedTable = node.kind === "row" && node.parentId && selected.has(node.parentId);
           // Only skip a row if: it is already rendered as a table row by the parent database
           // AND it has no block content AND the user hasn't explicitly selected any child blocks inside it.
           const hasSelectedChildren = node.children?.some(c => selected.has(c.id)) ?? false;
           if (rowAlreadyInSelectedTable && !blocks.length && !hasSelectedChildren) {
-             // Skip — pure leaf row, rendered only in the parent table
+            // Skip — pure leaf row, rendered only in the parent table
           } else {
-             items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
+            items.push({ id: node.id, kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
           }
         }
-        
+
         baseProgress += UNITS_PER_NODE;
         setExportCurrent(baseProgress);
       }
-      
+
       setExportStatus("Generating export mapping...");
       const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current, { signal: controller.signal, onStatus: setExportStatus });
-      
+
       setExportStatus("Ready!");
       setTitleMap(titleById);
       setExportItems(items);
-      
+
       // Ensure we hit the 100% mark in state before closing
       setExportCurrent(selectedNodes.length * UNITS_PER_NODE);
-      
+
     } catch (err) {
       if (!isAbortError(err)) setError(errorMessage(err));
     } finally {
@@ -639,8 +717,9 @@ export default function Page() {
   function clearWork() {
     treeAbortRef.current?.abort();
     exportAbortRef.current?.abort();
-    setUrl("");
-    setDetected(null);
+    setUrls([""]);
+    setActiveInputIndex(0);
+    setDetectedList([]);
     setNodes([]);
     setSelected(new Set());
     setExportItems([]);
@@ -648,6 +727,22 @@ export default function Page() {
     setLoadingTree(false);
     setExporting(false);
   }
+
+  // Auto reset if all inputs empty
+  useEffect(() => {
+    const hasAnyUrl = urls.some(u => u.trim());
+    if (!hasAnyUrl && detectedList.length > 0) {
+      treeAbortRef.current?.abort();
+      exportAbortRef.current?.abort();
+      setDetectedList([]);
+      setNodes([]);
+      setSelected(new Set());
+      setExportItems([]);
+      setError("");
+      setLoadingTree(false);
+      setExporting(false);
+    }
+  }, [urls, detectedList.length]);
 
   return (
     <main className="min-h-screen pb-24 bg-zinc-50">
@@ -658,8 +753,8 @@ export default function Page() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
               <p className="text-xs font-medium text-zinc-500">
-                {activeToken?.workspaceName 
-                  ? `${activeToken.workspaceName} (${activeToken.label})` 
+                {activeToken?.workspaceName
+                  ? `${activeToken.workspaceName} (${activeToken.label})`
                   : activeToken?.label ?? "No active workspace"}
               </p>
             </div>
@@ -709,13 +804,13 @@ export default function Page() {
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
-                  {detected && (
-                    <span className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
-                      {detected.type === "page" ? <FileText className="h-3 w-3" /> : detected.type === "database" ? <Database className="h-3 w-3" /> : <Table2 className="h-3 w-3" />}
-                      {detected.type.replace("_", " ")} · {detected.title}
+                  <label className="block text-sm font-medium text-zinc-900">Paste Notion page or database URLs</label>
+                  {detectedList.map((det, index) => (
+                    <span key={index} className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
+                      {det.type === "page" ? <FileText className="h-3 w-3" /> : det.type === "database" ? <Database className="h-3 w-3" /> : <Table2 className="h-3 w-3" />}
+                      {det.type.replace("_", " ")} · {det.title}
                     </span>
-                  )}
+                  ))}
                   {relativeTime && (
                     <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
                       Fetched {relativeTime}
@@ -723,8 +818,8 @@ export default function Page() {
                   )}
                   {error && <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
                 </div>
-                
-                <div className="flex flex-wrap items-center gap-4">
+
+                <div className="flex flex-wrap items-center gap-4 ml-auto">
                   {/* Before Fetch Settings */}
                   <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
                     <div className="flex items-center gap-2">
@@ -796,104 +891,178 @@ export default function Page() {
                         </div>
                         <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Relation IDs</span>
                       </label>
+                      <div className="h-4 w-px bg-zinc-200" />
+                      <button
+                        type="button"
+                        onClick={clearWork}
+                        className="text-xs font-bold text-red-600 hover:text-red-800 transition active:scale-95"
+                      >
+                        Reset Session
+                      </button>
                     </div>
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
-                <div className="relative flex-1 group">
-                  <input
-                    className="w-full rounded-md border border-zinc-300 pl-3.5 pr-10 py-2 text-sm outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    placeholder="https://www.notion.so/..."
-                  />
-                  {url && (
+              <div className="flex flex-col lg:flex-row gap-6 items-start justify-between">
+                {/* Left Side: Inputs */}
+                <div className="flex-1 w-full space-y-3">
+                  {urls.map((singleUrl, index) => (
+                    <div key={index} className="flex gap-2 items-center">
+                      <div className="relative flex-1 group">
+                        <input
+                          className={`w-full rounded-md border pl-3.5 pr-10 py-2 text-sm outline-none transition duration-150 ${activeInputIndex === index
+                            ? "border-zinc-950 ring-2 ring-zinc-950/10"
+                            : "border-zinc-300 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                            }`}
+                          value={singleUrl}
+                          onChange={(event) => {
+                            setUrls(prev => {
+                              const next = [...prev];
+                              next[index] = event.target.value;
+                              return next;
+                            });
+                          }}
+                          onFocus={() => setActiveInputIndex(index)}
+                          placeholder="Paste a Notion page or database URL..."
+                        />
+                        {singleUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUrls(prev => {
+                                const next = [...prev];
+                                next[index] = "";
+                                return next;
+                              });
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            title="Clear URL"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                      {urls.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUrls(prev => {
+                              const next = prev.filter((_, i) => i !== index);
+                              if (activeInputIndex >= next.length) {
+                                setActiveInputIndex(Math.max(0, next.length - 1));
+                              }
+                              return next;
+                            });
+                          }}
+                          className="rounded-md border border-zinc-300 bg-white p-2 text-zinc-500 hover:bg-red-50 hover:text-red-500 transition shadow-sm"
+                          title="Remove link"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUrls(prev => [...prev, ""]);
+                      setActiveInputIndex(urls.length);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95"
+                  >
+                    + Add another URL
+                  </button>
+                </div>
+
+                {/* Right Side: Action Buttons */}
+                <div className="shrink-0 flex flex-col gap-2 items-stretch lg:pt-1 w-full lg:w-auto">
+                  {loadingTree && (
                     <button
                       type="button"
-                      onClick={clearWork}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      title="Clear"
+                      onClick={cancelFetch}
+                      className="flex items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-100"
                     >
                       <X className="h-4 w-4" />
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]"
+                    disabled={loadingTree || !urls.some(u => u.trim())}
+                  >
+                    {loadingTree ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>Fetching...</span>
+                      </>
+                    ) : (
+                      detected ? "Refetch" : "Fetch"
+                    )}
+                  </button>
+                  {detected && flatNodes.length > 0 && (
+                    <>
+                      <button type="button" className="flex items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-50" onClick={deselectAll} disabled={!flatNodes.length}>Deselect All</button>
+                      <button type="button" className="flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
+                    </>
+                  )}
+                  {activeToken && detected && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+                      onClick={runExport}
+                      disabled={exporting || selected.size === 0}
+                    >
+                      {exporting ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                          <span>Preparing...</span>
+                        </>
+                      ) : (
+                        <span>Export ({selected.size})</span>
+                      )}
                     </button>
                   )}
                 </div>
-                {detected && flatNodes.length > 0 && (
-                  <>
-                    <button type="button" className="flex items-center justify-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
-                    <button type="button" className="flex items-center justify-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:opacity-50" onClick={deselectAll} disabled={!flatNodes.length}>Deselect All</button>
-                  </>
-                )}
-                <button 
-                  type="submit"
-                  className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]" 
-                  disabled={loadingTree || !url.trim()}
-                >
-                  {loadingTree ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Fetching...</span>
-                    </>
-                  ) : (
-                    detected ? "Refetch" : "Fetch"
-                  )}
-                </button>
-                {loadingTree && (
-                  <button
-                    type="button"
-                    onClick={cancelFetch}
-                    className="flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
-                  >
-                    <X className="h-4 w-4" />
-                    Cancel
-                  </button>
-                )}
-                {activeToken && selected.size > 0 && (
-                  <button 
-                    type="button"
-                    className="flex items-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-400" 
-                    onClick={runExport} 
-                    disabled={exporting}
-                  >
-                    {exporting ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 animate-spin text-white" />
-                        <span>Preparing...</span>
-                      </>
-                    ) : (
-                      <span>Export ({selected.size})</span>
-                    )}
-                  </button>
-                )}
               </div>
-              
-              {urlHistory.length > 0 && !detected && (
+
+              {displayedHistory.length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <History className="h-4 w-4 text-zinc-400" />
                   <span className="text-xs text-zinc-500">Recent:</span>
-                    {urlHistory.map((item, i) => (
-                      <div key={i} className="group relative flex h-7 items-stretch rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden transition-colors hover:border-zinc-300">
-                        <button
-                          type="button"
-                          onClick={() => setUrl(item.url)}
-                          className="inline-flex flex-1 items-center gap-1.5 bg-white px-2.5 text-xs text-zinc-600 transition hover:bg-zinc-50 border-r border-zinc-100"
-                          title={item.url}
-                        >
-                          <span className="flex items-center justify-center text-zinc-400">
-                            {item.type === 'page' ? <FileText className="h-3.5 w-3.5" /> : item.type === 'database' ? <Database className="h-3.5 w-3.5" /> : item.type === 'data_source' ? <Table2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                          </span>
-                          <span className="max-w-[150px] truncate">{item.title || item.url}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeUrlHistory(i)}
-                          className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-red-50 hover:text-red-500"
-                          title="Remove from history"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
+                  {displayedHistory.map((item, i) => (
+                    <div key={i} className="group relative flex h-7 items-stretch rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden transition-colors hover:border-zinc-300">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUrls(prev => {
+                            const next = [...prev];
+                            if (activeInputIndex >= 0 && activeInputIndex < next.length) {
+                              next[activeInputIndex] = item.url;
+                            } else {
+                              next[0] = item.url;
+                            }
+                            return next;
+                          });
+                        }}
+                        className="inline-flex flex-1 items-center gap-1.5 bg-white px-2.5 text-xs text-zinc-600 transition hover:bg-zinc-50 border-r border-zinc-100"
+                        title={item.url}
+                      >
+                        <span className="flex items-center justify-center text-zinc-400">
+                          {item.type === 'page' ? <FileText className="h-3.5 w-3.5" /> : item.type === 'database' ? <Database className="h-3.5 w-3.5" /> : item.type === 'data_source' ? <Table2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                        </span>
+                        <span className="max-w-[150px] truncate">{item.title || item.url}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeUrlHistory(item.url)}
+                        className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-red-50 hover:text-red-500"
+                        title="Remove from history"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -904,11 +1073,11 @@ export default function Page() {
 
 
             {detected && (
-              <FinderTree 
-                nodes={nodes} 
-                selected={selected} 
-                loading={loadingTree} 
-                onToggle={toggleNode} 
+              <FinderTree
+                nodes={nodes}
+                selected={selected}
+                loading={loadingTree}
+                onToggle={toggleNode}
                 onConfigureDatabase={handleConfigureDatabase}
               />
             )}
@@ -918,30 +1087,30 @@ export default function Page() {
 
 
       <TokenManager open={managerOpen} tokens={tokens} activeLabel={activeLabel} onClose={() => setManagerOpen(false)} onChange={refreshTokens} />
-      
-      <DatabaseConfigModal 
-        open={configOpen} 
+
+      <DatabaseConfigModal
+        open={configOpen}
         token={activeToken?.token}
-        node={configNode} 
-        onClose={() => setConfigOpen(false)} 
-        onSave={saveDatabaseConfig} 
+        node={configNode}
+        onClose={() => setConfigOpen(false)}
+        onSave={saveDatabaseConfig}
         showIdForRelationRollup={showRelationIds}
         maxChildren={maxChildren}
       />
 
-      <ExportProgress 
-        open={exporting} 
-        total={exportTotal} 
-        current={exportCurrent} 
+      <ExportProgress
+        open={exporting}
+        total={exportTotal}
+        current={exportCurrent}
         status={exportStatus}
         onCancel={cancelExport}
       />
 
-      <ExportModal 
-        open={exportItems.length > 0 && !exporting} 
-        items={exportItems} 
-        titleById={titleMap} 
-        onClose={() => setExportItems([])} 
+      <ExportModal
+        open={exportItems.length > 0 && !exporting}
+        items={exportItems}
+        titleById={titleMap}
+        onClose={() => setExportItems([])}
         showIdForRelationRollup={showRelationIds}
         onToggleShowIdForRelationRollup={handleShowRelationIdsChange}
       />
@@ -1055,12 +1224,12 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       node.properties = metadata.properties ?? node.properties;
       node.isLinkedDatabase = metadata.isLinkedDatabase ?? node.isLinkedDatabase;
       const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind as "database" | "data_source");
-      
+
       if (node.depth + 1 > maxDepth) return node;
 
       const isLinkedDb = !!node.isLinkedDatabase;
       if (isLinkedDb && !memo.fetchLinkedChildren) return node;
-      
+
       if (!node.children) {
         const previewColumns = node.previewColumns && node.previewColumns.length > 0
           ? node.previewColumns
@@ -1070,7 +1239,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
         const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns);
         node.children = rows;
       }
-      
+
       node.children = await Promise.all((node.children ?? []).map((row) => buildNode(token, row, maxDepth, memo)));
     }
   } catch (err) {

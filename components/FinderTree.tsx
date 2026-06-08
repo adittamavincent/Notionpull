@@ -92,7 +92,7 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
       {/* Indentation & Collapse Button */}
       <div 
         className="flex h-full shrink-0 items-center" 
-        style={{ width: `${node.depth * 24 + 8}px` }}
+        style={{ width: `${node.depth * 24 + 28}px` }}
       >
         <button
           className={`ml-auto flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-200 ${hasChildren ? "text-zinc-500" : "invisible"}`}

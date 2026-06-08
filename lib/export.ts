@@ -89,24 +89,23 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
 
 function generateHierarchyTree(items: ExportItem[]): string {
   const lines: string[] = [];
-  const seenIds = new Set<string>();
 
   for (const item of items) {
     const id = isDatabaseItem(item) ? item.id : (item.page?.id || item.id);
     const depth = item.depth ?? 0;
     const indent = "  ".repeat(depth);
     
-    if (id && !seenIds.has(id)) {
+    if (id) {
       lines.push(`${indent}- [${item.kind}] ${item.title} (${id})`);
-      seenIds.add(id);
     }
 
     if (isDatabaseItem(item)) {
       const rowIndent = "  ".repeat(depth + 1);
+      const seenRowIds = new Set<string>();
       for (const row of item.rows) {
-        if (!seenIds.has(row.id)) {
+        if (!seenRowIds.has(row.id)) {
            lines.push(`${rowIndent}- [row] ${pageTitle(row) || "Untitled"} (${row.id})`);
-           seenIds.add(row.id);
+           seenRowIds.add(row.id);
         }
       }
     }
