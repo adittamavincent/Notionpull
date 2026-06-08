@@ -102,9 +102,51 @@ export function ExportModal({ open, items, titleById, onClose, showIdForRelation
   );
 }
 
+function highlightJsonLine(line: string): React.ReactNode {
+  const jsonTokenRegex = /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(?=\s*:))|("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*")|(-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)|(true|false|null)|([{}[\]:,])/g;
+
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = jsonTokenRegex.exec(line)) !== null) {
+    const matchIndex = match.index;
+    if (matchIndex > lastIndex) {
+      parts.push(line.substring(lastIndex, matchIndex));
+    }
+
+    const [raw, key, , strVal, , numVal, boolNullVal, punct] = match;
+
+    if (key) {
+      parts.push(<span key={matchIndex} className="text-purple-300 font-medium">{key}</span>);
+    } else if (strVal) {
+      parts.push(<span key={matchIndex} className="text-orange-300">{strVal}</span>);
+    } else if (numVal) {
+      parts.push(<span key={matchIndex} className="text-blue-300">{numVal}</span>);
+    } else if (boolNullVal) {
+      parts.push(<span key={matchIndex} className="text-amber-400 font-medium">{boolNullVal}</span>);
+    } else if (punct) {
+      parts.push(<span key={matchIndex} className="text-zinc-400">{punct}</span>);
+    }
+
+    lastIndex = jsonTokenRegex.lastIndex;
+  }
+
+  if (lastIndex < line.length) {
+    parts.push(line.substring(lastIndex));
+  }
+
+  return <span>{parts}</span>;
+}
+
 export function HighlightedCode({ text }: { text: string }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [clickedIndex, setClickedIndex] = useState<number | null>(null);
+
+  const isJson = useMemo(() => {
+    const trimmed = text.trim();
+    return trimmed.startsWith("{") || trimmed.startsWith("[");
+  }, [text]);
 
   // Parse lines into text/tag parts
   const parsedLines = useMemo(() => {
@@ -204,7 +246,9 @@ export function HighlightedCode({ text }: { text: string }) {
           const line = lineParts[0].text;
           let content: React.ReactNode = line;
           
-          if (line.trim().startsWith("<!--") && line.trim().endsWith("-->")) {
+          if (isJson) {
+            content = highlightJsonLine(line);
+          } else if (line.trim().startsWith("<!--") && line.trim().endsWith("-->")) {
             content = <span className="text-zinc-500 italic">{line}</span>;
           } else if (line.startsWith("#")) {
             content = <span className="text-blue-400 font-bold">{line}</span>;
@@ -237,7 +281,7 @@ export function HighlightedCode({ text }: { text: string }) {
           <div key={idx} className="min-h-[1.25rem] whitespace-pre">
             {lineParts.map((part, pIdx) => {
               if (part.type === "text") {
-                return <span key={pIdx}>{part.text}</span>;
+                return <span key={pIdx}>{isJson ? highlightJsonLine(part.text) : part.text}</span>;
               }
 
               const isHighlighted = 

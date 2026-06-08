@@ -389,10 +389,12 @@ function TreeBranch({
                       <div key={key}><span className="text-zinc-500">{key}:</span> <span className="text-green-300">{value}</span></div>
                     ))}
                     {node.log.requestBody && (
-                      <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
-                        <pre>{JSON.stringify(node.log.requestBody, null, 2)}</pre>
-                      </div>
-                    )}
+                       <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
+                         <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                           <code><HighlightedCode text={JSON.stringify(node.log.requestBody, null, 2)} /></code>
+                         </pre>
+                       </div>
+                     )}
                   </div>
                 </div>
                 <div>
@@ -827,7 +829,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                               ))}
                               {log.requestBody && (
                                 <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
-                                  <pre>{JSON.stringify(log.requestBody, null, 2)}</pre>
+                                  <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                                    <code><HighlightedCode text={JSON.stringify(log.requestBody, null, 2)} /></code>
+                                  </pre>
                                 </div>
                               )}
                             </div>
