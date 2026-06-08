@@ -1,4 +1,4 @@
-import { databaseTitle, notionErrorResponse, notionFetch, traceChild, tokenFromRequest } from "@/lib/notion";
+import { databaseTitle, notionErrorResponse, notionFetch, traceChild, tokenFromRequest, resolveDatabaseActualTitle } from "@/lib/notion";
 import type { NotionDatabase } from "@/types/notion";
 
 type Params = { params: { id: string } };
@@ -15,8 +15,11 @@ export async function GET(request: Request, { params }: Params) {
       ? await notionFetch<any>(token, `/data_sources/${params.id}`, {}, { tracePath: traceChild(traceRoot, "data-source") })
       : await notionFetch<any>(token, `/databases/${params.id}`, {}, { tracePath: traceChild(traceRoot, "database") });
 
-    let dataSourceId = isDataSource ? database.id : (database.data_sources?.[0]?.id ?? database.id);
-    let dataSourceName = isDataSource ? database.name : database.data_sources?.[0]?.name;
+    const actualInfo = !isDataSource ? await resolveDatabaseActualTitle(token, database, traceRoot) : null;
+    const dbTitle = isDataSource ? (database.name ?? "Untitled data source") : (actualInfo?.title ?? databaseTitle(database));
+
+    let dataSourceId = isDataSource ? database.id : (actualInfo?.dataSourceId ?? database.data_sources?.[0]?.id ?? database.id);
+    let dataSourceName = isDataSource ? database.name : (actualInfo?.dataSourceName ?? database.data_sources?.[0]?.name);
     let views: Array<{ id: string; title?: string; data_source_id?: string; configuration?: any }> = [];
     let activeView: any = null;
     if (!isDataSource) {
@@ -107,9 +110,11 @@ export async function GET(request: Request, { params }: Params) {
       ? !database.data_sources?.some((ds: any) => ds.id === activeView.data_source_id)
       : (!database.data_sources || database.data_sources.length === 0);
 
+    // Title is already resolved via actualInfo.title or database.name above.
+
     return Response.json({
       id: database.id,
-      title: isDataSource ? (database.name ?? "Untitled data source") : databaseTitle(database),
+      title: dbTitle,
       dataSourceId,
       dataSourceName,
       isLinkedDatabase,

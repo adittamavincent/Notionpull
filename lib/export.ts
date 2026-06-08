@@ -54,7 +54,7 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
   }
   
   for (const page of uniquePages.values()) {
-    const xml = pagePropertiesToXml(page, options);
+    const xml = pageToXml(page, options);
     if (xml) definitionOutputs.push(xml);
   }
 
@@ -63,22 +63,8 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
   const hierarchyStr = generateHierarchyTree(items);
   if (hierarchyStr) {
     structureOutputs.push(hierarchyStr);
-  }
-  
-  const blocksOutputs: string[] = [];
-  for (const page of uniquePages.values()) {
-    const blocksStr = pageBlocksToXml(page, options);
-    if (blocksStr) {
-      blocksOutputs.push(blocksStr);
-    }
-  }
-
-  if (blocksOutputs.length > 0) {
-    structureOutputs.push(blocksOutputs.join("\n\n"));
-  }
-
-  if (!hierarchyStr && blocksOutputs.length === 0) {
-    structureOutputs.push("<!-- No nested structure or blocks available -->");
+  } else {
+    structureOutputs.push("<!-- No nested structure available -->");
   }
 
   const defStr = definitionOutputs.join("\n\n");
@@ -226,39 +212,36 @@ function databaseColumns(item: DatabaseExportItem): string[] {
   return [...seen];
 }
 
-function pagePropertiesToXml(item: PageExportItem, options: ExportOptions): string | null {
-  if (item.includeProperties === false) return null; // Already in a database table!
-
+function pageToXml(item: PageExportItem, options: ExportOptions): string | null {
   const id = item.page?.id || item.id;
+  const blocks = item.blocks?.map((b) => blockToXml(b, options)).filter(Boolean) ?? [];
+  const hasBlocks = blocks.length > 0;
+
+  if (item.includeProperties === false && !hasBlocks) {
+    return null;
+  }
+
   const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
   if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
   if (item.depth !== undefined) attributes.push(`depth="${item.depth}"`);
   
   const lines = [`<page ${attributes.join(" ")}>`];
 
-  if (item.page?.properties && Object.keys(item.page.properties).length > 0) {
-    lines.push("<properties>");
+  if (item.includeProperties !== false && item.page?.properties && Object.keys(item.page.properties).length > 0) {
+    lines.push("  <properties>");
     for (const [name, prop] of Object.entries(item.page.properties)) {
-      lines.push(`<property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
+      lines.push(`    <property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
     }
-    lines.push("</properties>");
+    lines.push("  </properties>");
+  }
+
+  if (hasBlocks) {
+    for (const block of blocks) {
+      lines.push(indent(block, 1));
+    }
   }
 
   lines.push("</page>");
-  return lines.join("\n");
-}
-
-function pageBlocksToXml(item: PageExportItem, options: ExportOptions): string | null {
-  const blocks = item.blocks?.map((b) => blockToXml(b, options)).filter(Boolean) ?? [];
-  if (blocks.length === 0) return null;
-
-  const id = item.page?.id || item.id;
-  const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
-  if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
-  
-  const lines = [`<page-structure ${attributes.join(" ")}>`];
-  lines.push(...blocks);
-  lines.push("</page-structure>");
   return lines.join("\n");
 }
 

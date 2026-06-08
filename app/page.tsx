@@ -290,6 +290,12 @@ export default function Page() {
     const activeUrls = urls.map(u => u.trim()).filter(Boolean);
     if (!activeUrls.length) return;
 
+    const allIds = activeUrls.flatMap(url => extractNotionIds(url));
+    if (allIds.length === 0) {
+      setError("Could not find a valid Notion ID in the URL(s).");
+      return;
+    }
+
     if (resetLog) {
       try {
         await fetch("/api/notion/debug", { method: "DELETE" });

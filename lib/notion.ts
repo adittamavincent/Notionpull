@@ -198,7 +198,7 @@ export function blockTitle(block: any): string {
   return "";
 }
 
-import { addLog } from "./logger";
+import { addLog, saveResolvedTitle, saveViewDatabase } from "./logger";
 
 let notionServerQueue: Promise<void> = Promise.resolve();
 let notionServerBlockedUntil = 0;
@@ -284,6 +284,9 @@ export async function notionFetch<T>(
       } else if (responseBodyJson.object === "block") {
         nameTag = blockTitle(responseBodyJson);
         objectType = "block";
+      } else if (responseBodyJson.object === "view") {
+        nameTag = responseBodyJson.name ?? "Untitled view";
+        objectType = "view";
       } else if (responseBodyJson.object === "list") {
         nameTag = `List (${responseBodyJson.results?.length ?? 0} items)`;
         objectType = "list";
@@ -298,6 +301,15 @@ export async function notionFetch<T>(
 
       if (nameTag) logEntry.nameTag = nameTag;
       if (objectType) logEntry.objectType = objectType;
+
+      if (nameTag && nameTag.toLowerCase() !== "untitled" && nameTag.toLowerCase() !== "untitled database" && nameTag.toLowerCase() !== "untitled data source" && nameTag.toLowerCase() !== "untitled view") {
+        if (responseBodyJson.object === "database" || responseBodyJson.object === "data_source" || responseBodyJson.object === "page" || responseBodyJson.object === "block" || responseBodyJson.object === "view") {
+          saveResolvedTitle(responseBodyJson.id, nameTag);
+        }
+      }
+      if (responseBodyJson.object === "view" && responseBodyJson.parent?.type === "database_id") {
+        saveViewDatabase(responseBodyJson.id, responseBodyJson.parent.database_id);
+      }
     } catch {
       logEntry.responseBody = responseBodyText;
     }
@@ -378,4 +390,55 @@ export function notionErrorResponse(error: unknown): Response {
 
 export function isExportableBlock(block: NotionBlock): boolean {
   return ["paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "to_do", "quote", "code", "divider", "callout", "table", "table_row"].includes(block.type);
+}
+
+export async function resolveDatabaseActualTitle(
+  token: string,
+  db: any,
+  traceRoot: string
+): Promise<{ title: string; dataSourceId?: string; dataSourceName?: string }> {
+  let dbTitle = databaseTitle(db);
+  let dataSourceId = db.data_sources?.[0]?.id;
+  let dataSourceName = db.data_sources?.[0]?.name;
+
+  if (!dataSourceId) {
+    try {
+      const viewsList = await notionFetch<any>(token, `/views?database_id=${encodeURIComponent(db.id)}`, {}, { tracePath: traceChild(traceRoot, `resolve-title-views-list`) });
+      const firstViewId = viewsList.results?.[0]?.id;
+      if (firstViewId) {
+        const view = await notionFetch<any>(token, `/views/${firstViewId}`, {}, { tracePath: traceChild(traceRoot, `resolve-title-view/${firstViewId}`) });
+        if (view.data_source_id) {
+          dataSourceId = view.data_source_id;
+        }
+      }
+    } catch (err) {
+      // Ignore views fetch errors
+    }
+  }
+
+  if (dataSourceId) {
+    try {
+      const ds = await notionFetch<any>(token, `/data_sources/${dataSourceId}`, {}, { tracePath: traceChild(traceRoot, `resolve-title-ds/${dataSourceId}`) });
+      dataSourceName = ds.name ?? dataSourceName;
+      const dsTitle = ds.name ?? (ds.title ? plainText(ds.title) : "");
+      if (dsTitle) {
+        saveResolvedTitle(dataSourceId, dsTitle);
+      }
+      if ((!dbTitle || dbTitle.toLowerCase() === "untitled" || dbTitle.toLowerCase() === "untitled database") && dsTitle) {
+        dbTitle = dsTitle;
+      }
+    } catch (err) {
+      // Ignore data source fetch errors
+    }
+  }
+
+  if (dbTitle && dbTitle.toLowerCase() !== "untitled" && dbTitle.toLowerCase() !== "untitled database") {
+    saveResolvedTitle(db.id, dbTitle);
+  }
+
+  return {
+    title: dbTitle,
+    dataSourceId,
+    dataSourceName
+  };
 }

@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, traceChild, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, traceChild, tokenFromRequest, resolveDatabaseActualTitle } from "@/lib/notion";
 import type { NotionDatabase, NotionPage } from "@/types/notion";
 
 export async function GET(request: Request) {
@@ -71,9 +71,13 @@ export async function GET(request: Request) {
 
     if (targetType === "database") {
       const database = await notionFetch<NotionDatabase>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, "database") });
+      const actualInfo = await resolveDatabaseActualTitle(token, database, traceRoot);
+      const dbTitle = actualInfo.title;
+      const resolvedDsId = actualInfo.dataSourceId ?? database.data_sources?.[0]?.id ?? database.id;
+
       let dataSource: any = null;
       try {
-        dataSource = await notionFetch<any>(token, `/data_sources/${database.data_sources?.[0]?.id ?? database.id}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
+        dataSource = await notionFetch<any>(token, `/data_sources/${resolvedDsId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
       } catch {
         dataSource = database;
       }
@@ -175,9 +179,9 @@ export async function GET(request: Request) {
       return Response.json({
         type: "database",
         id: database.id,
-        title: databaseTitle(database),
-        dataSourceId: viewDataSourceId ?? database.data_sources?.[0]?.id ?? database.id,
-        dataSourceName: dataSource?.name ?? database.data_sources?.find((source: any) => source.id === viewDataSourceId)?.name ?? database.data_sources?.[0]?.name,
+        title: dbTitle,
+        dataSourceId: viewDataSourceId ?? resolvedDsId,
+        dataSourceName: dataSource?.name ?? actualInfo.dataSourceName ?? database.data_sources?.find((source: any) => source.id === viewDataSourceId)?.name ?? database.data_sources?.[0]?.name,
         isLinkedDatabase,
         columns,
         selectedColumns,

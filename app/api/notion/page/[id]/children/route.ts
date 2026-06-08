@@ -1,4 +1,4 @@
-import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, traceChild, tokenFromRequest } from "@/lib/notion";
+import { blockTitle, databaseTitle, pageTitle, notionErrorResponse, notionFetch, NotionApiError, traceChild, tokenFromRequest, resolveDatabaseActualTitle } from "@/lib/notion";
 
 type Params = { params: { id: string } };
 
@@ -15,47 +15,67 @@ export async function GET(request: Request, { params }: Params) {
       start_cursor = body.has_more ? body.next_cursor : undefined;
     } while (start_cursor);
 
-    // Resolve link_to_page blocks in parallel
+    // Resolve link_to_page and child_database blocks in parallel
     const linkToPageBlocks = blocks.filter((block) => block.type === "link_to_page");
+    const childDbBlocks = blocks.filter((block) => block.type === "child_database");
     const resolvedLinks = new Map<string, { targetId: string; targetType: "database" | "page"; title: string; dataSourceName?: string }>();
+    const resolvedDbs = new Map<string, { title: string; dataSourceName?: string }>();
+
+    const promises: Promise<any>[] = [];
 
     if (linkToPageBlocks.length > 0) {
-      await Promise.allSettled(
-        linkToPageBlocks.map(async (block) => {
-          const link = block.link_to_page;
-          if (!link) return;
-          const targetType = link.type === "database_id" ? "database" : (link.type === "page_id" ? "page" : null);
-          if (!targetType) return;
-          const targetId = link.type === "database_id" ? link.database_id : link.page_id;
-          if (!targetId) return;
+      promises.push(...linkToPageBlocks.map(async (block) => {
+        const link = block.link_to_page;
+        if (!link) return;
+        const targetType = link.type === "database_id" ? "database" : (link.type === "page_id" ? "page" : null);
+        if (!targetType) return;
+        const targetId = link.type === "database_id" ? link.database_id : link.page_id;
+        if (!targetId) return;
 
-          try {
-            if (targetType === "database") {
-              const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-database/${targetId}`) });
-              const actualDbId = db.data_sources?.[0]?.id ?? targetId;
-              resolvedLinks.set(block.id, {
-                targetId: actualDbId,
-                targetType: "database",
-                title: databaseTitle(db),
-                dataSourceName: db.data_sources?.[0]?.name
-              });
-            } else {
-              const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
-              resolvedLinks.set(block.id, {
-                targetId,
-                targetType: "page",
-                title: pageTitle(pg)
-              });
-            }
-          } catch {
+        try {
+          if (targetType === "database") {
+            const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-database/${targetId}`) });
+            const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
+            const actualDbId = actualInfo.dataSourceId ?? targetId;
+            resolvedLinks.set(block.id, {
+              targetId: actualDbId,
+              targetType: "database",
+              title: actualInfo.title,
+              dataSourceName: actualInfo.dataSourceName
+            });
+          } else {
+            const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
             resolvedLinks.set(block.id, {
               targetId,
-              targetType: targetType === "database" ? "database" : "page",
-              title: targetType === "database" ? "Untitled database" : "Untitled page"
+              targetType: "page",
+              title: pageTitle(pg)
             });
           }
-        })
-      );
+        } catch {
+          resolvedLinks.set(block.id, {
+            targetId,
+            targetType: targetType === "database" ? "database" : "page",
+            title: targetType === "database" ? "Untitled database" : "Untitled page"
+          });
+        }
+      }));
+    }
+
+    if (childDbBlocks.length > 0) {
+      promises.push(...childDbBlocks.map(async (block) => {
+        try {
+          const db = await notionFetch<any>(token, `/databases/${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `database/${block.id}`) });
+          const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
+          resolvedDbs.set(block.id, {
+            title: actualInfo.title,
+            dataSourceName: actualInfo.dataSourceName
+          });
+        } catch {}
+      }));
+    }
+
+    if (promises.length > 0) {
+      await Promise.allSettled(promises);
     }
 
     return Response.json({
@@ -76,6 +96,14 @@ export async function GET(request: Request, { params }: Params) {
               title = resolved.title;
               dataSourceName = resolved.dataSourceName;
               hasChildren = resolved.targetType === "database" ? true : block.has_children;
+            }
+          }
+
+          if (block.type === "child_database") {
+            const resolved = resolvedDbs.get(block.id);
+            if (resolved) {
+              title = resolved.title;
+              dataSourceName = resolved.dataSourceName;
             }
           }
 

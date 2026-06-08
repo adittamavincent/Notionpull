@@ -18,11 +18,330 @@ type TreeLogNode = {
 };
 
 function formatClock(timestamp: number) {
-  return new Date(timestamp).toISOString().split("T")[1].replace("Z", "");
+  const date = new Date(timestamp);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${hours}:${minutes}:${seconds}.${ms}`;
 }
 
 function formatPath(url: string) {
   return url.replace("https://api.notion.com/v1", "");
+}
+
+interface ParsedEndpoint {
+  category: string;
+  pattern: string;
+  resourceId?: string;
+  resourceIdName?: string;
+  subId?: string;
+  subIdName?: string;
+}
+
+function parseEndpointPattern(method: string, url: string): ParsedEndpoint {
+  let path = url;
+  if (url.startsWith("http")) {
+    try {
+      path = new URL(url).pathname;
+    } catch (e) {
+      path = url.replace("https://api.notion.com", "");
+    }
+  } else {
+    path = url;
+  }
+  path = path.split("?")[0];
+  const parts = path.split("/").filter(Boolean);
+
+  const isId = (segment: string) => {
+    if (!segment) return false;
+    const clean = segment.replace(/-/g, "");
+    return /^[a-f0-9]{32}$/i.test(clean);
+  };
+
+  const getCategory = (base: string): string => {
+    switch (base) {
+      case "users": return "Users";
+      case "pages": return "Pages";
+      case "blocks": return "Blocks";
+      case "data_sources": return "Data Sources";
+      case "databases": return "Databases";
+      case "comments": return "Comments";
+      case "file_uploads": return "File Uploads";
+      case "custom_emojis": return "Custom Emojis";
+      case "views": return "Views";
+      case "search": return "Search";
+      case "oauth": return "OAuth";
+      default: return base.charAt(0).toUpperCase() + base.slice(1).replace(/_/g, " ");
+    }
+  };
+
+  let startIndex = parts[0] === "v1" ? 1 : 0;
+  const apiPrefix = parts[0] === "v1" ? "/v1" : "";
+
+  if (parts.length - startIndex === 0) {
+    return { category: "API", pattern: method + " " + path };
+  }
+
+  const baseSegment = parts[startIndex];
+  const category = getCategory(baseSegment);
+
+  if (baseSegment === "users") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/users` };
+    }
+    if (parts[startIndex + 1] === "me") {
+      return { category, pattern: `${method} ${apiPrefix}/users/me` };
+    }
+    return {
+      category,
+      pattern: `${method} ${apiPrefix}/users/{user_id}`,
+      resourceId: parts[startIndex + 1],
+      resourceIdName: "user_id"
+    };
+  }
+
+  if (baseSegment === "pages") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/pages` };
+    }
+    const pageId = parts[startIndex + 1];
+    if (parts.length - startIndex === 2) {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/pages/{page_id}`,
+        resourceId: pageId,
+        resourceIdName: "page_id"
+      };
+    }
+    if (parts[startIndex + 2] === "move") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/pages/{page_id}/move`,
+        resourceId: pageId,
+        resourceIdName: "page_id"
+      };
+    }
+    if (parts[startIndex + 2] === "markdown") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/pages/{page_id}/markdown`,
+        resourceId: pageId,
+        resourceIdName: "page_id"
+      };
+    }
+    if (parts[startIndex + 2] === "properties") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/pages/{page_id}/properties/{property_id}`,
+        resourceId: pageId,
+        resourceIdName: "page_id",
+        subId: parts[startIndex + 3],
+        subIdName: "property_id"
+      };
+    }
+  }
+
+  if (baseSegment === "blocks") {
+    if (parts[startIndex + 1] === "meeting_notes" && parts[startIndex + 2] === "query") {
+      return { category, pattern: `${method} ${apiPrefix}/blocks/meeting_notes/query` };
+    }
+    const blockId = parts[startIndex + 1];
+    if (parts.length - startIndex === 2) {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/blocks/{block_id}`,
+        resourceId: blockId,
+        resourceIdName: "block_id"
+      };
+    }
+    if (parts[startIndex + 2] === "children") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/blocks/{block_id}/children`,
+        resourceId: blockId,
+        resourceIdName: "block_id"
+      };
+    }
+    if (parts[startIndex + 2] === "query") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/blocks/{block_id}/query`,
+        resourceId: blockId,
+        resourceIdName: "block_id"
+      };
+    }
+  }
+
+  if (baseSegment === "data_sources") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/data_sources` };
+    }
+    const dsId = parts[startIndex + 1];
+    if (parts.length - startIndex === 2) {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/data_sources/{data_source_id}`,
+        resourceId: dsId,
+        resourceIdName: "data_source_id"
+      };
+    }
+    if (parts[startIndex + 2] === "templates") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/data_sources/{data_source_id}/templates`,
+        resourceId: dsId,
+        resourceIdName: "data_source_id"
+      };
+    }
+    if (parts[startIndex + 2] === "query") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/data_sources/{data_source_id}/query`,
+        resourceId: dsId,
+        resourceIdName: "data_source_id"
+      };
+    }
+  }
+
+  if (baseSegment === "databases") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/databases` };
+    }
+    return {
+      category,
+      pattern: `${method} ${apiPrefix}/databases/{database_id}`,
+      resourceId: parts[startIndex + 1],
+      resourceIdName: "database_id"
+    };
+  }
+
+  if (baseSegment === "comments") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/comments` };
+    }
+    return {
+      category,
+      pattern: `${method} ${apiPrefix}/comments/{comment_id}`,
+      resourceId: parts[startIndex + 1],
+      resourceIdName: "comment_id"
+    };
+  }
+
+  if (baseSegment === "file_uploads") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/file_uploads` };
+    }
+    const uploadId = parts[startIndex + 1];
+    if (parts.length - startIndex === 2) {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/file_uploads/{file_upload_id}`,
+        resourceId: uploadId,
+        resourceIdName: "file_upload_id"
+      };
+    }
+    if (parts[startIndex + 2] === "send") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/file_uploads/{file_upload_id}/send`,
+        resourceId: uploadId,
+        resourceIdName: "file_upload_id"
+      };
+    }
+    if (parts[startIndex + 2] === "complete") {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/file_uploads/{file_upload_id}/complete`,
+        resourceId: uploadId,
+        resourceIdName: "file_upload_id"
+      };
+    }
+  }
+
+  if (baseSegment === "custom_emojis") {
+    return { category, pattern: `${method} ${apiPrefix}/custom_emojis` };
+  }
+
+  if (baseSegment === "views") {
+    if (parts.length - startIndex === 1) {
+      return { category, pattern: `${method} ${apiPrefix}/views` };
+    }
+    const viewId = parts[startIndex + 1];
+    if (parts.length - startIndex === 2) {
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/views/{view_id}`,
+        resourceId: viewId,
+        resourceIdName: "view_id"
+      };
+    }
+    if (parts[startIndex + 2] === "queries") {
+      if (parts.length - startIndex === 3) {
+        return {
+          category,
+          pattern: `${method} ${apiPrefix}/views/{view_id}/queries`,
+          resourceId: viewId,
+          resourceIdName: "view_id"
+        };
+      }
+      return {
+        category,
+        pattern: `${method} ${apiPrefix}/views/{view_id}/queries/{query_id}`,
+        resourceId: viewId,
+        resourceIdName: "view_id",
+        subId: parts[startIndex + 3],
+        subIdName: "query_id"
+      };
+    }
+  }
+
+  if (baseSegment === "search") {
+    return { category, pattern: `${method} ${apiPrefix}/search` };
+  }
+
+  if (baseSegment === "oauth") {
+    const sub = parts[startIndex + 1];
+    return { category, pattern: `${method} ${apiPrefix}/oauth/${sub || "token"}` };
+  }
+
+  let patternParts = parts.slice(startIndex).map((p) => {
+    if (isId(p)) return "{id}";
+    return p;
+  });
+  const pattern = `${method} ${apiPrefix}/${patternParts.join("/")}`;
+  const firstId = parts.slice(startIndex).find(isId);
+  return {
+    category,
+    pattern,
+    resourceId: firstId,
+    resourceIdName: firstId ? "id" : undefined
+  };
+}
+
+function categoryTone(category: string) {
+  const c = category.toLowerCase();
+  if (c.includes("user")) return "bg-amber-50 text-amber-700 border-amber-200/70";
+  if (c.includes("page")) return "bg-emerald-50 text-emerald-700 border-emerald-200/70";
+  if (c.includes("block")) return "bg-indigo-50 text-indigo-700 border-indigo-200/70";
+  if (c.includes("database")) return "bg-sky-50 text-sky-700 border-sky-200/70";
+  if (c.includes("data source")) return "bg-violet-50 text-violet-700 border-violet-200/70";
+  if (c.includes("comment")) return "bg-rose-50 text-rose-700 border-rose-200/70";
+  if (c.includes("file upload")) return "bg-cyan-50 text-cyan-700 border-cyan-200/70";
+  if (c.includes("custom emoji")) return "bg-teal-50 text-teal-700 border-teal-200/70";
+  if (c.includes("view")) return "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200/70";
+  if (c.includes("search")) return "bg-orange-50 text-orange-700 border-orange-200/70";
+  if (c.includes("oauth")) return "bg-pink-50 text-pink-700 border-pink-200/70";
+  return "bg-zinc-50 text-zinc-700 border-zinc-200/70";
+}
+
+function methodBadgeTone(method: string) {
+  const m = method.toUpperCase();
+  if (m === "GET") return "bg-blue-50 text-blue-700 border-blue-200/70";
+  if (m === "POST") return "bg-emerald-50 text-emerald-700 border-emerald-200/70";
+  if (m === "PATCH") return "bg-amber-50 text-amber-700 border-amber-200/70";
+  if (m === "DELETE") return "bg-red-50 text-red-700 border-red-200/70";
+  return "bg-zinc-50 text-zinc-700 border-zinc-200/70";
 }
 
 function methodTone(method: string) {
@@ -320,12 +639,21 @@ function TreeBranch({
       )}
 
       {node.log ? (
-        <div className={`overflow-hidden rounded-lg border bg-white shadow-sm transition-all ${isError ? "border-red-200 ring-1 ring-red-50" : "border-zinc-200 hover:border-zinc-300"}`}>
+        <div className={`overflow-hidden rounded-lg border shadow-sm transition-all ${
+          isError ? "border-red-200 ring-1 ring-red-50 bg-white" :
+          isExpanded ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 hover:border-zinc-300 bg-white"
+        }`}>
           <div className="flex items-start gap-1.5 px-3 py-1.5">
             <button
               type="button"
               onClick={() => hasChildren && onToggleCollapsed(node.key)}
-              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-zinc-500 transition-colors ${hasChildren ? "border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700" : "border-transparent opacity-30"}`}
+              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                hasChildren 
+                  ? isExpanded
+                    ? "border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                    : "border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700 text-zinc-500"
+                  : "border-transparent opacity-30 text-zinc-500"
+              }`}
               title={hasChildren ? (isCollapsed ? "Expand branch" : "Collapse branch") : "No nested requests"}
             >
               {hasChildren ? (isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <span className="h-3 w-3" />}
@@ -334,47 +662,77 @@ function TreeBranch({
             <button
               type="button"
               onClick={() => onToggleExpanded(node.log!.id)}
-              className="flex min-w-0 flex-1 flex-col gap-1 text-left"
+              className={`flex min-w-0 flex-1 flex-col gap-1 text-left transition-colors ${isExpanded ? 'text-zinc-200' : 'text-zinc-900'}`}
             >
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <LogPill tone={methodTone(node.log.method)} className="px-1.5 py-0">{node.log.method}</LogPill>
-                <span className={`inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-semibold tabular-nums ${
-                  isError ? "border-red-200 bg-red-100 text-red-700" :
-                  node.log.status === 0 ? "border-amber-200 bg-amber-50 text-amber-700 animate-pulse" :
-                  "border-zinc-200 bg-zinc-100 text-zinc-700"
-                }`}>
-                  {node.log.status === 0 ? "PENDING" : node.log.status}
-                </span>
-                {node.log.objectType && (
-                  <span className={`inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-semibold ${objectTone(node.log.objectType)}`}>
-                    {node.log.objectType}
-                  </span>
-                )}
-                <span className="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0 text-[9px] font-semibold text-zinc-600">
-                  {node.path}
-                </span>
-              </div>
+              {(() => {
+                const parsed = parseEndpointPattern(node.log!.method, node.log!.url);
+                return (
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 w-full">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      {/* Method badge */}
+                      <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${methodBadgeTone(node.log!.method)}`}>
+                        {node.log!.method}
+                      </span>
 
-              <div className="min-w-0 text-xs font-semibold text-zinc-800">
-                <span className="truncate" title={getSurfaceLabel(node.log)}>
-                  {getSurfaceLabel(node.log)}
-                </span>
-              </div>
+                      {/* Status badge */}
+                      <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold ${
+                        isError ? 'bg-red-100 text-red-700 border-red-200' :
+                        node.log!.status === 0 ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
+                        'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}>
+                        {node.log!.status === 0 ? "PENDING" : node.log!.status}
+                      </span>
 
-              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
-                <span className="rounded bg-zinc-100 px-1 py-0 font-mono text-[9px] tabular-nums">
-                  {node.log.duration}ms
-                </span>
-                <span>{formatClock(node.log.timestamp)}</span>
-                <span className="truncate text-zinc-400" title={formatPath(node.log.url)}>
-                  {formatPath(node.log.url)}
-                </span>
-              </div>
+                      {/* Category badge */}
+                      <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${categoryTone(parsed.category)}`}>
+                        {parsed.category}
+                      </span>
+
+                      {/* Endpoint pattern */}
+                      <code className={`text-[10px] font-mono border px-1.5 py-0.5 rounded whitespace-nowrap ${
+                        isExpanded 
+                          ? 'bg-zinc-900 text-zinc-300 border-zinc-800' 
+                          : 'bg-zinc-100 text-zinc-600 border-zinc-200'
+                      }`}>
+                        {parsed.pattern}
+                      </code>
+                    </div>
+
+                    {/* Target resource name and ID */}
+                    <div className="flex flex-col md:items-end md:text-right md:ml-auto min-w-0 text-xs">
+                      {node.log!.nameTag && node.log!.nameTag !== formatPath(node.log!.url) ? (
+                        <>
+                          <span className={`font-bold truncate max-w-[250px] ${isExpanded ? 'text-zinc-200' : 'text-zinc-800'}`} title={node.log!.nameTag}>
+                            {node.log!.nameTag}
+                          </span>
+                          {parsed.resourceId && (
+                            <span className={`font-mono text-[9px] truncate max-w-[200px] ${isExpanded ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                              {parsed.resourceIdName}: {parsed.resourceId}
+                            </span>
+                          )}
+                        </>
+                      ) : parsed.resourceId ? (
+                        <span className={`font-mono text-[10px] font-semibold truncate max-w-[250px] ${isExpanded ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                          {parsed.resourceIdName}: {parsed.resourceId}
+                        </span>
+                      ) : (
+                        <span className={`italic ${isExpanded ? 'text-zinc-600' : 'text-zinc-500'}`}>No Target ID</span>
+                      )}
+                    </div>
+
+                    {/* Duration and timestamp */}
+                    <div className={`flex shrink-0 items-center gap-2 text-[10px] self-end md:self-auto ${isExpanded ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                      <span className={`rounded px-1 py-0 font-mono text-[9px] tabular-nums ${isExpanded ? 'bg-zinc-900 text-zinc-400' : 'bg-zinc-100 text-zinc-500'}`}>{node.log!.duration}ms</span>
+                      <span>{formatClock(node.log!.timestamp)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </button>
           </div>
 
           {isExpanded && (
-            <div className="border-t border-zinc-100 bg-zinc-950 p-3 text-xs text-zinc-300">
+            <div className="border-t border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <div>
                   <div className="mb-1.5 flex items-center justify-between gap-1.5">
@@ -390,7 +748,7 @@ function TreeBranch({
                     ))}
                     {node.log.requestBody && (
                        <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
-                         <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                         <pre className="max-h-[500px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
                            <code><HighlightedCode text={JSON.stringify(node.log.requestBody, null, 2)} /></code>
                          </pre>
                        </div>
@@ -404,7 +762,7 @@ function TreeBranch({
                       {copiedResponseId === node.log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                     </button>
                   </div>
-                  <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                  <pre className="max-h-[500px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
                     <code><HighlightedCode text={formatResponseJson(node.log)} /></code>
                   </pre>
                 </div>
@@ -575,7 +933,6 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     if (open) {
       clearedAtRef.current = 0;
       fetchLogs();
-      const interval = setInterval(fetchLogs, 1000);
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Escape") {
           onClose();
@@ -584,7 +941,6 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
 
       window.addEventListener("keydown", handleKeyDown);
       return () => {
-        clearInterval(interval);
         window.removeEventListener("keydown", handleKeyDown);
       };
     }
@@ -760,60 +1116,88 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                 const isError = log.status >= 400;
 
                 return (
-                  <div key={log.id} className={`overflow-hidden rounded-lg border bg-white shadow-sm transition-all ${isError ? 'border-red-200 ring-1 ring-red-50' : 'border-zinc-200 hover:border-zinc-300'}`}>
+                  <div key={log.id} className={`overflow-hidden rounded-lg border shadow-sm transition-all ${
+                    isError ? 'border-red-200 ring-1 ring-red-50 bg-white' : 
+                    isExpanded ? 'border-zinc-800 bg-zinc-950' : 'border-zinc-200 hover:border-zinc-300 bg-white'
+                  }`}>
                     <button
                       onClick={() => toggleExpandedLog(log.id)}
-                      className="flex w-full items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-zinc-50"
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-left transition-colors ${
+                        isExpanded ? 'hover:bg-zinc-900/50 text-zinc-200' : 'hover:bg-zinc-50 text-zinc-900'
+                      }`}
                       type="button"
                     >
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        {isExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" /> : <ChevronRight className="h-3 w-3 shrink-0 text-zinc-400" />}
+                      {(() => {
+                        const parsed = parseEndpointPattern(log.method, log.url);
+                        return (
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 w-full">
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                              {/* Toggle indicator */}
+                              {isExpanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
 
-                        <div className={`flex w-12 shrink-0 justify-center rounded px-1.5 py-0 text-[10px] font-bold tracking-wider ${
-                          log.method === 'GET' ? 'bg-blue-50 text-blue-700' :
-                          log.method === 'POST' ? 'bg-green-50 text-green-700' : 'bg-purple-50 text-purple-700'
-                        }`}>
-                          {log.method}
-                        </div>
+                              {/* Method badge */}
+                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${methodBadgeTone(log.method)}`}>
+                                {log.method}
+                              </span>
 
-                        <div className={`flex w-12 shrink-0 justify-center rounded px-1.5 py-0 text-[9px] font-bold ${
-                          isError ? 'bg-red-100 text-red-700' :
-                          log.status === 0 ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' :
-                          'bg-zinc-100 text-zinc-700'
-                        }`}>
-                          {log.status === 0 ? "PENDING" : log.status}
-                        </div>
+                              {/* Status badge */}
+                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold ${
+                                isError ? 'bg-red-100 text-red-700 border-red-200' :
+                                log.status === 0 ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
+                                'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {log.status === 0 ? "PENDING" : log.status}
+                              </span>
 
-                        <div className="flex items-center gap-1.5 truncate">
-                          {log.nameTag && (
-                            <span className={`max-w-[200px] shrink-0 truncate rounded border px-1.5 py-0 text-[10px] font-semibold shadow-sm ${
-                              log.objectType === 'database'
-                                ? 'border-blue-200/50 bg-blue-50 text-blue-700'
-                                : log.objectType === 'data_source'
-                                ? 'border-purple-200/50 bg-purple-50 text-purple-700'
-                                : log.objectType === 'page'
-                                ? 'border-emerald-200/50 bg-emerald-50 text-emerald-700'
-                                : log.objectType === 'list'
-                                ? 'border-zinc-200 bg-zinc-100 text-zinc-700'
-                                : 'border-zinc-900 bg-zinc-800 text-white'
-                            }`}>
-                              {log.nameTag}
-                            </span>
-                          )}
-                          <div className="truncate text-xs font-semibold text-zinc-700" title={log.url}>
-                            {formatPath(log.url)}
+                              {/* Category badge */}
+                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${categoryTone(parsed.category)}`}>
+                                {parsed.category}
+                              </span>
+
+                              {/* Endpoint pattern */}
+                              <code className={`text-[10px] font-mono border px-1.5 py-0.5 rounded whitespace-nowrap ${
+                                isExpanded 
+                                  ? 'bg-zinc-900 text-zinc-300 border-zinc-800' 
+                                  : 'bg-zinc-100 text-zinc-600 border-zinc-200'
+                              }`}>
+                                {parsed.pattern}
+                              </code>
+                            </div>
+
+                            {/* Target resource name and ID */}
+                            <div className="flex flex-col md:items-end md:text-right md:ml-auto min-w-0 text-xs">
+                              {log.nameTag && log.nameTag !== formatPath(log.url) ? (
+                                <>
+                                  <span className={`font-bold truncate max-w-[250px] ${isExpanded ? 'text-zinc-200' : 'text-zinc-800'}`} title={log.nameTag}>
+                                    {log.nameTag}
+                                  </span>
+                                  {parsed.resourceId && (
+                                    <span className={`font-mono text-[9px] truncate max-w-[200px] ${isExpanded ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                                      {parsed.resourceIdName}: {parsed.resourceId}
+                                    </span>
+                                  )}
+                                </>
+                              ) : parsed.resourceId ? (
+                                <span className={`font-mono text-[10px] font-semibold truncate max-w-[250px] ${isExpanded ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                                  {parsed.resourceIdName}: {parsed.resourceId}
+                                </span>
+                              ) : (
+                                <span className={`italic ${isExpanded ? 'text-zinc-600' : 'text-zinc-500'}`}>No Target ID</span>
+                              )}
+                            </div>
+
+                            {/* Duration and timestamp */}
+                            <div className={`flex shrink-0 items-center gap-2 text-[10px] self-end md:self-auto ${isExpanded ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                              <span className={`rounded px-1 py-0 font-mono text-[9px] tabular-nums ${isExpanded ? 'bg-zinc-900 text-zinc-400' : 'bg-zinc-100 text-zinc-500'}`}>{log.duration}ms</span>
+                              <span>{formatClock(log.timestamp)}</span>
+                            </div>
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-2 text-[10px] text-zinc-500">
-                        <span className="rounded bg-zinc-100 px-1 py-0 font-mono text-[9px]">{log.duration}ms</span>
-                        <span>{formatClock(log.timestamp)}</span>
-                      </div>
+                        );
+                      })()}
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-zinc-100 bg-zinc-950 p-3 text-xs text-zinc-300">
+                      <div className="border-t border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-300">
                         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                           <div>
                             <div className="mb-1.5 flex items-center justify-between gap-1.5">
@@ -829,7 +1213,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                               ))}
                               {log.requestBody && (
                                 <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
-                                  <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                                  <pre className="max-h-[500px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
                                     <code><HighlightedCode text={JSON.stringify(log.requestBody, null, 2)} /></code>
                                   </pre>
                                 </div>
@@ -843,7 +1227,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                                 {copiedResponseId === log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                               </button>
                             </div>
-                            <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                            <pre className="max-h-[500px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
                               <code><HighlightedCode text={formatResponseJson(log)} /></code>
                             </pre>
                           </div>
