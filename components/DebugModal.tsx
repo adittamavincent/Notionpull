@@ -319,25 +319,25 @@ function TreeBranch({
       )}
 
       {node.log ? (
-        <div className={`overflow-hidden rounded-xl border bg-white shadow-sm transition-all ${isError ? "border-red-200 ring-1 ring-red-50" : "border-zinc-200 hover:border-zinc-300"}`}>
-          <div className="flex items-start gap-2 px-4 py-3">
+        <div className={`overflow-hidden rounded-lg border bg-white shadow-sm transition-all ${isError ? "border-red-200 ring-1 ring-red-50" : "border-zinc-200 hover:border-zinc-300"}`}>
+          <div className="flex items-start gap-1.5 px-3 py-1.5">
             <button
               type="button"
               onClick={() => hasChildren && onToggleCollapsed(node.key)}
-              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-zinc-500 transition-colors ${hasChildren ? "border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700" : "border-transparent opacity-30"}`}
+              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-zinc-500 transition-colors ${hasChildren ? "border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700" : "border-transparent opacity-30"}`}
               title={hasChildren ? (isCollapsed ? "Expand branch" : "Collapse branch") : "No nested requests"}
             >
-              {hasChildren ? (isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <span className="h-4 w-4" />}
+              {hasChildren ? (isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <span className="h-3 w-3" />}
             </button>
 
             <button
               type="button"
               onClick={() => onToggleExpanded(node.log!.id)}
-              className="flex min-w-0 flex-1 flex-col gap-2 text-left"
+              className="flex min-w-0 flex-1 flex-col gap-1 text-left"
             >
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <LogPill tone={methodTone(node.log.method)}>{node.log.method}</LogPill>
-                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <LogPill tone={methodTone(node.log.method)} className="px-1.5 py-0">{node.log.method}</LogPill>
+                <span className={`inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-semibold tabular-nums ${
                   isError ? "border-red-200 bg-red-100 text-red-700" :
                   node.log.status === 0 ? "border-amber-200 bg-amber-50 text-amber-700 animate-pulse" :
                   "border-zinc-200 bg-zinc-100 text-zinc-700"
@@ -345,23 +345,23 @@ function TreeBranch({
                   {node.log.status === 0 ? "PENDING" : node.log.status}
                 </span>
                 {node.log.objectType && (
-                  <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${objectTone(node.log.objectType)}`}>
+                  <span className={`inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-semibold ${objectTone(node.log.objectType)}`}>
                     {node.log.objectType}
                   </span>
                 )}
-                <span className="inline-flex items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
+                <span className="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0 text-[9px] font-semibold text-zinc-600">
                   {node.path}
                 </span>
               </div>
 
-              <div className="min-w-0 text-sm font-medium text-zinc-800">
+              <div className="min-w-0 text-xs font-semibold text-zinc-800">
                 <span className="truncate" title={getSurfaceLabel(node.log)}>
                   {getSurfaceLabel(node.log)}
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+                <span className="rounded bg-zinc-100 px-1 py-0 font-mono text-[9px] tabular-nums">
                   {node.log.duration}ms
                 </span>
                 <span>{formatClock(node.log.timestamp)}</span>
@@ -373,35 +373,35 @@ function TreeBranch({
           </div>
 
           {isExpanded && (
-            <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="border-t border-zinc-100 bg-zinc-950 p-3 text-xs text-zinc-300">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <div>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
-                    <button type="button" onClick={() => onCopyRequest(node.log!)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
-                      {copiedRequestId === node.log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy request
+                  <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                    <button type="button" onClick={() => onCopyRequest(node.log!)} className="inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10">
+                      {copiedRequestId === node.log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy request
                     </button>
                   </div>
-                  <div className="overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
-                    <div className="mb-2 text-blue-400">{node.log.method} {node.log.url}</div>
+                  <div className="overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
+                    <div className="mb-1 text-blue-400">{node.log.method} {node.log.url}</div>
                     {node.log.requestHeaders && Object.entries(node.log.requestHeaders).map(([key, value]) => (
                       <div key={key}><span className="text-zinc-500">{key}:</span> <span className="text-green-300">{value}</span></div>
                     ))}
                     {node.log.requestBody && (
-                      <div className="mt-3 border-t border-white/10 pt-3 text-zinc-300">
+                      <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
                         <pre>{JSON.stringify(node.log.requestBody, null, 2)}</pre>
                       </div>
                     )}
                   </div>
                 </div>
                 <div>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
-                    <button type="button" onClick={() => onCopyResponse(node.log!)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
-                      {copiedResponseId === node.log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy response
+                  <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
+                    <button type="button" onClick={() => onCopyResponse(node.log!)} className="inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10">
+                      {copiedResponseId === node.log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                     </button>
                   </div>
-                  <div className="h-full max-h-[320px] overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
+                  <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
                     <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(node.log)}</pre>
                   </div>
                 </div>
@@ -751,7 +751,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
               </p>
             </div>
           ) : viewMode === "chronological" ? (
-            <div className="space-y-4">
+            <div className="space-y-2">
               {logs.map((log) => {
                 const isExpanded = expandedId === log.id;
                 const isError = log.status >= 400;
@@ -760,20 +760,20 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                   <div key={log.id} className={`overflow-hidden rounded-lg border bg-white shadow-sm transition-all ${isError ? 'border-red-200 ring-1 ring-red-50' : 'border-zinc-200 hover:border-zinc-300'}`}>
                     <button
                       onClick={() => toggleExpandedLog(log.id)}
-                      className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-zinc-50"
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-zinc-50"
                       type="button"
                     >
-                      <div className="flex items-center gap-4 overflow-hidden">
-                        {isExpanded ? <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />}
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        {isExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" /> : <ChevronRight className="h-3 w-3 shrink-0 text-zinc-400" />}
 
-                        <div className={`flex w-16 shrink-0 justify-center rounded px-2 py-0.5 text-xs font-bold tracking-wider ${
+                        <div className={`flex w-12 shrink-0 justify-center rounded px-1.5 py-0 text-[10px] font-bold tracking-wider ${
                           log.method === 'GET' ? 'bg-blue-50 text-blue-700' :
                           log.method === 'POST' ? 'bg-green-50 text-green-700' : 'bg-purple-50 text-purple-700'
                         }`}>
                           {log.method}
                         </div>
 
-                        <div className={`flex w-16 shrink-0 justify-center rounded px-2 py-0.5 text-[10px] font-bold ${
+                        <div className={`flex w-12 shrink-0 justify-center rounded px-1.5 py-0 text-[9px] font-bold ${
                           isError ? 'bg-red-100 text-red-700' :
                           log.status === 0 ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' :
                           'bg-zinc-100 text-zinc-700'
@@ -781,9 +781,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                           {log.status === 0 ? "PENDING" : log.status}
                         </div>
 
-                        <div className="flex items-center gap-2 truncate">
+                        <div className="flex items-center gap-1.5 truncate">
                           {log.nameTag && (
-                            <span className={`max-w-[200px] shrink-0 truncate rounded border px-2 py-0.5 text-xs font-semibold shadow-sm ${
+                            <span className={`max-w-[200px] shrink-0 truncate rounded border px-1.5 py-0 text-[10px] font-semibold shadow-sm ${
                               log.objectType === 'database'
                                 ? 'border-blue-200/50 bg-blue-50 text-blue-700'
                                 : log.objectType === 'data_source'
@@ -797,48 +797,48 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                               {log.nameTag}
                             </span>
                           )}
-                          <div className="truncate text-sm font-medium text-zinc-700" title={log.url}>
+                          <div className="truncate text-xs font-semibold text-zinc-700" title={log.url}>
                             {formatPath(log.url)}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-4 text-xs text-zinc-500">
-                        <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px]">{log.duration}ms</span>
+                      <div className="flex shrink-0 items-center gap-2 text-[10px] text-zinc-500">
+                        <span className="rounded bg-zinc-100 px-1 py-0 font-mono text-[9px]">{log.duration}ms</span>
                         <span>{formatClock(log.timestamp)}</span>
                       </div>
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-zinc-100 bg-zinc-950 p-4 text-sm text-zinc-300">
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                      <div className="border-t border-zinc-100 bg-zinc-950 p-3 text-xs text-zinc-300">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                           <div>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Request</h4>
-                              <button type="button" onClick={() => handleCopyRequest(log)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
-                                {copiedRequestId === log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy request
+                            <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                              <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Request</h4>
+                              <button type="button" onClick={() => handleCopyRequest(log)} className="inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10">
+                                {copiedRequestId === log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy request
                               </button>
                             </div>
-                            <div className="overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
-                              <div className="mb-2 text-blue-400">{log.method} {log.url}</div>
+                            <div className="overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
+                              <div className="mb-1 text-blue-400">{log.method} {log.url}</div>
                               {log.requestHeaders && Object.entries(log.requestHeaders).map(([k, v]) => (
                                 <div key={k}><span className="text-zinc-500">{k}:</span> <span className="text-green-300">{v}</span></div>
                               ))}
                               {log.requestBody && (
-                                <div className="mt-3 border-t border-white/10 pt-3 text-zinc-300">
+                                <div className="mt-2 border-t border-white/10 pt-2 text-zinc-300">
                                   <pre>{JSON.stringify(log.requestBody, null, 2)}</pre>
                                 </div>
                               )}
                             </div>
                           </div>
                           <div>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
-                              <button type="button" onClick={() => handleCopyResponse(log)} className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:bg-white/10">
-                                {copiedResponseId === log.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} Copy response
+                            <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                              <h4 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Response JSON</h4>
+                              <button type="button" onClick={() => handleCopyResponse(log)} className="inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10">
+                                {copiedResponseId === log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                               </button>
                             </div>
-                            <div className="h-full max-h-[400px] overflow-x-auto rounded-md border border-white/5 bg-black/50 p-3 font-mono text-xs">
+                            <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
                               <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(log)}</pre>
                             </div>
                           </div>
