@@ -226,8 +226,10 @@ export async function notionFetch<T>(
   const logEntry: any = {
     id: Math.random().toString(36).substring(2, 9),
     timestamp: start,
+    duration: 0,
     method,
     url,
+    status: 0, // 0 = PENDING
     tracePath: trace?.tracePath,
     requestHeaders: {
       Authorization: `Bearer ${token}`,
@@ -238,6 +240,8 @@ export async function notionFetch<T>(
     },
     requestBody,
   };
+
+  addLog(logEntry);
 
   let capturedError: any = null;
 
@@ -315,10 +319,11 @@ export async function notionFetch<T>(
   } catch (error: any) {
     capturedError = error;
   } finally {
-    if (!logEntry.duration) logEntry.duration = Date.now() - start;
-    if (capturedError && !logEntry.status) logEntry.status = capturedError.status || 500;
+    logEntry.duration = Date.now() - start;
+    if (capturedError && (!logEntry.status || logEntry.status === 0)) {
+      logEntry.status = capturedError.status || 500;
+    }
     if (capturedError) logEntry.error = capturedError.message || String(capturedError);
-    addLog(logEntry);
   }
 
   throw capturedError;

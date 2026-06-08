@@ -337,8 +337,12 @@ function TreeBranch({
             >
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <LogPill tone={methodTone(node.log.method)}>{node.log.method}</LogPill>
-                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${isError ? "border-red-200 bg-red-100 text-red-700" : "border-zinc-200 bg-zinc-100 text-zinc-700"}`}>
-                  {node.log.status}
+                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+                  isError ? "border-red-200 bg-red-100 text-red-700" :
+                  node.log.status === 0 ? "border-amber-200 bg-amber-50 text-amber-700 animate-pulse" :
+                  "border-zinc-200 bg-zinc-100 text-zinc-700"
+                }`}>
+                  {node.log.status === 0 ? "PENDING" : node.log.status}
                 </span>
                 {node.log.objectType && (
                   <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${objectTone(node.log.objectType)}`}>
@@ -568,7 +572,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     if (open) {
       clearedAtRef.current = 0;
       fetchLogs();
-      const interval = setInterval(fetchLogs, 5000);
+      const interval = setInterval(fetchLogs, 1000);
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Escape") {
           onClose();
@@ -769,10 +773,12 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                           {log.method}
                         </div>
 
-                        <div className={`flex w-12 shrink-0 justify-center rounded px-2 py-0.5 text-xs font-bold ${
-                          isError ? 'bg-red-100 text-red-700' : 'bg-zinc-100 text-zinc-700'
+                        <div className={`flex w-16 shrink-0 justify-center rounded px-2 py-0.5 text-[10px] font-bold ${
+                          isError ? 'bg-red-100 text-red-700' :
+                          log.status === 0 ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' :
+                          'bg-zinc-100 text-zinc-700'
                         }`}>
-                          {log.status}
+                          {log.status === 0 ? "PENDING" : log.status}
                         </div>
 
                         <div className="flex items-center gap-2 truncate">
