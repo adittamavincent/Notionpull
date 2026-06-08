@@ -16,6 +16,7 @@ export type DatabaseExportItem = {
 };
 export type PageExportItem = { 
   kind: "page" | "row" | "block"; 
+  id?: string;
   title: string; 
   page?: NotionPage; 
   blocks?: NotionBlock[]; 
@@ -27,32 +28,91 @@ export type ExportItem = DatabaseExportItem | PageExportItem;
 export type ExportOptions = PropertyValueOptions;
 
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
-  const dbById = new Map<string, DatabaseExportItem>();
+  const definitionOutputs: string[] = [];
+  const structureOutputs: string[] = [];
+
+  const uniqueDbs = new Map<string, DatabaseExportItem>();
+  const uniquePages = new Map<string, PageExportItem>();
+
   for (const item of items) {
-    if (isDatabaseItem(item) && item.id) {
-      dbById.set(item.id, item);
+    if (isDatabaseItem(item)) {
+      if (item.id && !uniqueDbs.has(item.id)) {
+        uniqueDbs.set(item.id, item);
+      }
+    } else {
+      const pageId = item.page?.id || item.id;
+      if (pageId && !uniquePages.has(pageId)) {
+        uniquePages.set(pageId, item as PageExportItem);
+      }
     }
   }
 
-  const renderedDbIds = new Set<string>();
+  definitionOutputs.push("# Definition");
+  
+  for (const db of uniqueDbs.values()) {
+    definitionOutputs.push(databaseToXml(db, options));
+  }
+  
+  for (const page of uniquePages.values()) {
+    const xml = pagePropertiesToXml(page, options);
+    if (xml) definitionOutputs.push(xml);
+  }
 
-  // Process pages first to allow databases to be embedded
-  const pageItems = items.filter(item => !isDatabaseItem(item));
-  const databaseItems = items.filter(item => isDatabaseItem(item));
+  structureOutputs.push("# Structure");
+  
+  const hierarchyStr = generateHierarchyTree(items);
+  if (hierarchyStr) {
+    structureOutputs.push(hierarchyStr);
+  }
+  
+  const blocksOutputs: string[] = [];
+  for (const page of uniquePages.values()) {
+    const blocksStr = pageBlocksToXml(page, options);
+    if (blocksStr) {
+      blocksOutputs.push(blocksStr);
+    }
+  }
 
-  const pageOutputs = pageItems.map((item) => {
-    return pageToXml(item as PageExportItem, options, dbById, renderedDbIds);
-  });
+  if (blocksOutputs.length > 0) {
+    structureOutputs.push(blocksOutputs.join("\n\n"));
+  }
 
-  // Then process any remaining databases that weren't embedded in pages
-  const dbOutputs = databaseItems.map((item) => {
-    const dbItem = item as DatabaseExportItem;
-    if (dbItem.id && renderedDbIds.has(dbItem.id)) return null;
-    if (dbItem.id) renderedDbIds.add(dbItem.id);
-    return databaseToXml(dbItem, options);
-  }).filter(Boolean);
+  if (!hierarchyStr && blocksOutputs.length === 0) {
+    structureOutputs.push("<!-- No nested structure or blocks available -->");
+  }
 
-  return [...pageOutputs, ...dbOutputs].join("\n\n---\n\n");
+  const defStr = definitionOutputs.join("\n\n");
+  const structStr = structureOutputs.join("\n\n");
+
+  return [defStr, structStr].filter(Boolean).join("\n\n---\n\n");
+}
+
+function generateHierarchyTree(items: ExportItem[]): string {
+  const lines: string[] = [];
+  const seenIds = new Set<string>();
+
+  for (const item of items) {
+    const id = isDatabaseItem(item) ? item.id : (item.page?.id || item.id);
+    const depth = item.depth ?? 0;
+    const indent = "  ".repeat(depth);
+    
+    if (id && !seenIds.has(id)) {
+      lines.push(`${indent}- [${item.kind}] ${item.title} (${id})`);
+      seenIds.add(id);
+    }
+
+    if (isDatabaseItem(item)) {
+      const rowIndent = "  ".repeat(depth + 1);
+      for (const row of item.rows) {
+        if (!seenIds.has(row.id)) {
+           lines.push(`${rowIndent}- [row] ${pageTitle(row) || "Untitled"} (${row.id})`);
+           seenIds.add(row.id);
+        }
+      }
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function isDatabaseItem(item: ExportItem): item is DatabaseExportItem {
@@ -168,15 +228,17 @@ function databaseColumns(item: DatabaseExportItem): string[] {
   return [...seen];
 }
 
-function pageToXml(item: PageExportItem, options: ExportOptions, dbById?: Map<string, DatabaseExportItem>, renderedDbIds?: Set<string>): string {
-  const id = item.page?.id;
+function pagePropertiesToXml(item: PageExportItem, options: ExportOptions): string | null {
+  if (item.includeProperties === false) return null; // Already in a database table!
+
+  const id = item.page?.id || item.id;
   const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
   if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
   if (item.depth !== undefined) attributes.push(`depth="${item.depth}"`);
   
   const lines = [`<page ${attributes.join(" ")}>`];
 
-  if (item.includeProperties !== false && item.page?.properties && Object.keys(item.page.properties).length > 0) {
+  if (item.page?.properties && Object.keys(item.page.properties).length > 0) {
     lines.push("<properties>");
     for (const [name, prop] of Object.entries(item.page.properties)) {
       lines.push(`<property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
@@ -184,20 +246,29 @@ function pageToXml(item: PageExportItem, options: ExportOptions, dbById?: Map<st
     lines.push("</properties>");
   }
 
-  const blocks = item.blocks?.map((b) => blockToXml(b, dbById, renderedDbIds, options)).filter(Boolean) ?? [];
-  if (blocks.length > 0) {
-    lines.push(...blocks);
-  }
-
   lines.push("</page>");
   return lines.join("\n");
 }
 
-function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>, renderedDbIds?: Set<string>, options?: ExportOptions): string {
+function pageBlocksToXml(item: PageExportItem, options: ExportOptions): string | null {
+  const blocks = item.blocks?.map((b) => blockToXml(b, options)).filter(Boolean) ?? [];
+  if (blocks.length === 0) return null;
+
+  const id = item.page?.id || item.id;
+  const attributes = [`title="${escapeXmlAttribute(item.title)}"`];
+  if (id) attributes.unshift(`id="${escapeXmlAttribute(id)}"`);
+  
+  const lines = [`<page-structure ${attributes.join(" ")}>`];
+  lines.push(...blocks);
+  lines.push("</page-structure>");
+  return lines.join("\n");
+}
+
+function blockToXml(block: NotionBlock, options?: ExportOptions): string {
   const b = block as any;
   const data: any = b[b.type];
   const text = richTextToPlainText(data?.rich_text);
-  const children = b.children?.map((child: any) => blockToXml(child, dbById, renderedDbIds, options)).filter(Boolean) ?? [];
+  const children = b.children?.map((child: any) => blockToXml(child, options)).filter(Boolean) ?? [];
   
   let content = "";
   switch (b.type) {
@@ -234,10 +305,8 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
       content = `> [!NOTE]\n> ${text}`;
       break;
     case "column_list":
-      // Render each column's content side-by-side on new lines (plain text fallback)
       return children.join("\n\n") || "";
     case "column":
-      // Transparent wrapper — just pass through children
       return children.join("\n") || "";
     case "table": {
       const rows = b.children || [];
@@ -270,16 +339,6 @@ function blockToXml(block: NotionBlock, dbById?: Map<string, DatabaseExportItem>
       return `| ${cells.join(" | ")} |`;
     }
     case "child_database":
-      if (dbById && renderedDbIds && options) {
-        const dbId = b.id;
-        const dbItem = dbById.get(dbId);
-        if (dbItem) {
-          renderedDbIds.add(dbId);
-          const xml = `<block type="child_database" id="${escapeXmlAttribute(dbId)}" title="${escapeXmlAttribute(dbItem.title)}" />`;
-          const content = databaseToXml(dbItem, options);
-          return `${content}\n\n${xml}`;
-        }
-      }
       return `<block type="child_database" id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_database?.title ?? "Untitled db")}" />`;
     case "child_page":
       return `<block type="child_page" id="${escapeXmlAttribute(b.id)}" title="${escapeXmlAttribute(b.child_page?.title ?? "Untitled page")}" />`;
