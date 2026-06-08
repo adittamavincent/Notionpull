@@ -672,73 +672,100 @@ export default function Page() {
           <div className="space-y-6">
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
-                <label className="block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="block text-sm font-medium text-zinc-900">Paste a Notion page or database URL</label>
+                  {detected && (
+                    <span className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
+                      {detected.type === "page" ? <FileText className="h-3 w-3" /> : detected.type === "database" ? <Database className="h-3 w-3" /> : <Table2 className="h-3 w-3" />}
+                      {detected.type.replace("_", " ")} · {detected.title}
+                    </span>
+                  )}
+                  {relativeTime && (
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                      Fetched {relativeTime}
+                    </span>
+                  )}
+                  {error && <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
+                </div>
                 
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Max DB Children</span>
-                    <input
-                      type="number"
-                      className="w-16 rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                      value={maxChildren}
-                      onChange={(e) => handleMaxChildrenChange(Math.max(0, parseInt(e.target.value) || 0))}
-                      min="0"
-                      disabled={loadingTree}
-                    />
-                  </div>
+                <div className="flex flex-wrap items-center gap-6">
+                  {/* Before Fetch Settings */}
+                  <div className={`flex flex-wrap items-center gap-4 ${detected ? "border-r border-zinc-200 pr-6" : ""}`}>
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">Before Fetch</span>
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-zinc-500">Max DB Children</span>
+                      <input
+                        type="number"
+                        className="w-16 rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                        value={maxChildren}
+                        onChange={(e) => handleMaxChildrenChange(Math.max(0, parseInt(e.target.value) || 0))}
+                        min="0"
+                        disabled={loadingTree}
+                      />
+                    </div>
 
-                  <div className="hidden sm:block h-5 w-px bg-zinc-300" />
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
-                    <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
-                      {depthOptions.map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          className={`rounded px-2.5 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
-                          onClick={() => {
-                            if (option !== depth) {
-                              setDepth(option);
-                            }
-                          }}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-zinc-500">Depth</span>
+                      <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
+                        {depthOptions.map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            className={`rounded px-2 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
+                            onClick={() => {
+                              if (option !== depth) {
+                                setDepth(option);
+                              }
+                            }}
+                            disabled={loadingTree}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={fetchLinkedChildren}
+                          onChange={(e) => handleFetchLinkedChildrenChange(e.target.checked)}
                           disabled={loadingTree}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchLinkedChildren ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchLinkedChildren ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Linked DB Children</span>
+                    </label>
                   </div>
 
-                  <div className="hidden sm:block h-5 w-px bg-zinc-300" />
-
-                  <label className="flex items-center gap-2.5 cursor-pointer select-none group">
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        className="sr-only"
-                        checked={showRelationIds}
-                        onChange={(e) => handleShowRelationIdsChange(e.target.checked)}
-                      />
-                      <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${showRelationIds ? "bg-zinc-900" : "bg-zinc-200"}`} />
-                      <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${showRelationIds ? "translate-x-4" : "translate-x-0"}`} />
+                  {/* After Fetch Settings */}
+                  {detected && (
+                    <div className="flex flex-wrap items-center gap-4">
+                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">After Fetch</span>
+                      
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                        <div className="relative">
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={showRelationIds}
+                            onChange={(e) => handleShowRelationIdsChange(e.target.checked)}
+                          />
+                          <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${showRelationIds ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                          <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${showRelationIds ? "translate-x-4" : "translate-x-0"}`} />
+                        </div>
+                        <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Relation IDs</span>
+                      </label>
                     </div>
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 group-hover:text-zinc-600 transition-colors">Relation IDs</span>
-                  </label>
-
-                  <label className="flex items-center gap-2.5 cursor-pointer select-none group">
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        className="sr-only"
-                        checked={fetchLinkedChildren}
-                        onChange={(e) => handleFetchLinkedChildrenChange(e.target.checked)}
-                      />
-                      <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchLinkedChildren ? "bg-zinc-900" : "bg-zinc-200"}`} />
-                      <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchLinkedChildren ? "translate-x-4" : "translate-x-0"}`} />
-                    </div>
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 group-hover:text-zinc-600 transition-colors">Linked DB Children</span>
-                  </label>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -839,20 +866,7 @@ export default function Page() {
                 </div>
               )}
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {detected && (
-                  <span className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
-                    {detected.type === "page" ? <FileText className="h-3.5 w-3.5" /> : detected.type === "database" ? <Database className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
-                    {detected.type.replace("_", " ")} · {detected.title}
-                  </span>
-                )}
-                {relativeTime && (
-                  <span className="ml-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-                    Fetched {relativeTime}
-                  </span>
-                )}
-                {error && <span className="rounded bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
-              </div>
+
             </form>
 
 
