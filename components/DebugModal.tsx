@@ -402,11 +402,9 @@ function TreeBranch({
                       {copiedResponseId === node.log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                     </button>
                   </div>
-                  <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
-                    <pre className={isError ? "text-red-300" : "text-zinc-300"}>
-                      <code><HighlightedCode text={formatResponseJson(node.log)} /></code>
-                    </pre>
-                  </div>
+                  <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                    <code><HighlightedCode text={formatResponseJson(node.log)} /></code>
+                  </pre>
                 </div>
               </div>
             </div>
@@ -841,11 +839,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                                 {copiedResponseId === log.id ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />} Copy response
                               </button>
                             </div>
-                            <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
-                              <pre className={isError ? "text-red-300" : "text-zinc-300"}>
-                                <code><HighlightedCode text={formatResponseJson(log)} /></code>
-                              </pre>
-                            </div>
+                            <pre className="max-h-[220px] overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 rounded-md border border-white/5">
+                              <code><HighlightedCode text={formatResponseJson(log)} /></code>
+                            </pre>
                           </div>
                         </div>
                       </div>
