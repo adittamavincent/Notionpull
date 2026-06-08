@@ -8,7 +8,7 @@ export async function GET(request: Request, { params }: Params) {
     const token = tokenFromRequest(request);
     const { searchParams } = new URL(request.url);
     const depthParam = searchParams.get("depth");
-    const maxDepth = depthParam === "All" || !depthParam ? 20 : Number(depthParam);
+    const maxDepth = depthParam === "Surface" ? 0 : depthParam === "All" || !depthParam ? 20 : Number(depthParam);
 
     const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`);
     return Response.json({ results: blocks });

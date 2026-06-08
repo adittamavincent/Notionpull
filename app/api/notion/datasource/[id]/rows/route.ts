@@ -24,6 +24,20 @@ export async function GET(request: Request, { params }: Params) {
     } catch (err: any) {
       throw err;
     }
+
+    if (rows && Array.isArray(rows.results)) {
+      rows.results = await Promise.all(rows.results.map(async (row: any) => {
+        if (!row.properties || Object.keys(row.properties).length === 0 || !Object.values(row.properties).some((p: any) => p?.type === "title")) {
+          try {
+            return await notionFetch<any>(token, `/pages/${row.id}`, {}, { tracePath: traceChild(traceRoot, `page/${row.id}`) });
+          } catch {
+            return row;
+          }
+        }
+        return row;
+      }));
+    }
+
     rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? [], traceChild(traceRoot, "relations")), traceChild(traceRoot, "titles"));
     return Response.json(rows);
   } catch (error) {

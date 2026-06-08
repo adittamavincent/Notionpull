@@ -68,7 +68,7 @@ function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string
   const attrs = [`title="${escapeXmlAttribute(item.title)}"`];
   if (item.id) attrs.unshift(`id="${escapeXmlAttribute(item.id)}"`);
   attrs.push(`kind="${escapeXmlAttribute(item.kind)}"`);
-  attrs.push(`display="${item.rows.length === 1 ? "list" : "table"}"`);
+  attrs.push(`display="table"`);
   if (item.depth !== undefined) attrs.push(`depth="${item.depth}"`);
 
   const lines = [`<database ${attrs.join(" ")}>`];
@@ -91,7 +91,7 @@ function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string
     return lines.join("\n");
   }
 
-  lines.push(`<rows display="${item.rows.length === 1 ? "list" : "table"}">`);
+  lines.push(`<rows display="table">`);
   for (const row of item.rows) {
     lines.push(rowToXml(row, columns, options));
   }

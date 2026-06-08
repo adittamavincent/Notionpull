@@ -11,12 +11,12 @@ import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
-import { History, RefreshCw, LogOut, X } from "lucide-react";
+import { History, RefreshCw, LogOut, X, FileText, Database, Table2 } from "lucide-react";
 import Image from "next/image";
 
-type DepthOption = "1" | "2" | "3" | "4" | "5" | "All";
+type DepthOption = "Surface" | "1" | "2" | "3" | "4" | "5" | "All";
 
-const depthOptions: DepthOption[] = ["1", "2", "3", "4", "5", "All"];
+const depthOptions: DepthOption[] = ["Surface", "1", "2", "3", "4", "5", "All"];
 
 export interface HistoryItem {
   url: string;
@@ -37,8 +37,8 @@ export default function Page() {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   
-  // Requirement: Default depth 1
-  const [depth, setDepth] = useState<DepthOption>("1");
+  // Requirement: Default depth 1 (now Surface)
+  const [depth, setDepth] = useState<DepthOption>("Surface");
   const [loadingTree, setLoadingTree] = useState(false);
   const [error, setError] = useState("");
 
@@ -249,7 +249,7 @@ export default function Page() {
       if (successful) {
         setDetected(successful.value);
         saveUrlHistory(url.trim(), successful.value.title, successful.value.type);
-        await loadTree(successful.value, depth, false, controller);
+        await loadTree(successful.value, depth, true, controller);
       } else {
         // Find the most relevant error
         const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
@@ -298,7 +298,7 @@ export default function Page() {
     }
     
     try {
-      const maxDepth = currentDepth === "All" ? Infinity : Number(currentDepth);
+      const maxDepth = depthValue(currentDepth);
       const rootSeed: TreeNodeData = {
         id: object.id,
         title: object.title,
@@ -353,19 +353,6 @@ export default function Page() {
     }
   }
 
-  useEffect(() => {
-    if (detected && activeToken) {
-      void loadTree(detected, depth);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depth]);
-
-  function handleRefresh() {
-    if (!detected) return;
-    const cacheKey = treeCacheKey(detected.id, depth, detected.viewId);
-    treeCache.current.delete(cacheKey);
-    void loadTree(detected, depth, true);
-  }
 
   function toggleNode(node: TreeNodeData, checked: boolean) {
     setSelected((current) => {
@@ -475,34 +462,11 @@ export default function Page() {
         }
         
         if (node.kind === "database" || node.kind === "data_source") {
-          const containerKind = node.kind === "data_source" ? "data_source" : "database";
-          const database = node.dataSourceId && node.columns && node.properties
-            ? { dataSourceId: node.dataSourceId, columns: node.columns, properties: node.properties, columnDetails: node.columnDetails }
-            : await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${node.id}?kind=${encodeURIComponent(containerKind)}`, { signal: controller.signal, onStatus: setExportStatus });
-          
-          // Estimate number of batches to give granular progress
-          // Notion usually fetches in batches of 100
-          const estimatedRows = node.children?.length && node.children.length > 0 ? node.children.length : 200;
-          const estimatedBatches = Math.max(1, Math.ceil(estimatedRows / 100));
-          const unitsPerBatch = Math.floor(UNITS_PER_NODE / (estimatedBatches + 1));
-
-          const rowSourceKind = resolveRowSourceKind(node.id, database.dataSourceId, node.kind);
-          const allRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${database.dataSourceId}:${rowSourceKind}:${node.viewId ?? ""}`, () => 
-            fetchAllRows(activeToken.token, database.dataSourceId, rowSourceKind, node.viewId, (count) => {
-                const batchesDone = Math.floor(count / 100);
-                const progress = baseProgress + Math.min(UNITS_PER_NODE - 10, batchesDone * unitsPerBatch);
-                setExportCurrent(progress);
-                setExportStatus(`Loading ${node.title} (${count} rows)...`);
-            }, { signal: controller.signal, onStatus: setExportStatus })
-          );
-            
           let exportRows: NotionPage[] = [];
-          
-          // Only export rows that are actually loaded and checked/selected in the tree view.
-          // If rows are not loaded (due to depth limit) or none are selected, export empty rows.
           if (node.children && node.children.length > 0) {
-            const selectedRowIds = new Set(node.children.filter(c => selected.has(c.id)).map(c => c.id));
-            exportRows = allRows.filter(row => selectedRowIds.has(row.id));
+            exportRows = node.children
+              .filter((c) => selected.has(c.id) && c.page)
+              .map((c) => c.page!);
           }
           
           items.push({ 
@@ -510,13 +474,13 @@ export default function Page() {
             id: node.id,
             title: node.title, 
             rows: exportRows, 
-            columns: database.columns ?? node.columns,
+            columns: node.columns,
             selectedColumns: node.selectedColumns,
-            columnDetails: database.columnDetails ?? node.columnDetails,
+            columnDetails: node.columnDetails,
             viewId: node.viewId,
             viewTitle: node.views?.find((view) => view.id === node.viewId)?.title,
-            properties: database.properties,
-            depth: node.depth + 1
+            properties: node.properties,
+            depth: node.depth
           });
         } else {
           // Page/Row/Block fetching
@@ -533,30 +497,35 @@ export default function Page() {
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
                 if (block.type === "child_database") {
-                  const dbMetadata = await apiFetch<{ dataSourceId: string; columns?: string[]; properties?: Record<string, any>; columnDetails?: any[] }>(activeToken.token, `/api/notion/database/${block.id}?kind=database`, { signal: controller.signal, onStatus: setExportStatus });
-                  const dbRowKind = resolveRowSourceKind(block.id, dbMetadata.dataSourceId, "database");
-                  
-                  // Filter nested database rows based on whether their tree node row IDs are selected
-                  const dbTreeNode = flatNodes.find(n => n.id === block.id);
-                  const dbRows = await memoFetch(rowsCache.current, `${activeToken.token}:rows:${dbMetadata.dataSourceId}:${dbRowKind}:${dbTreeNode?.viewId ?? ""}`, () => fetchAllRows(activeToken.token, dbMetadata.dataSourceId, dbRowKind, dbTreeNode?.viewId, undefined, { signal: controller.signal, onStatus: setExportStatus }));
-                  let exportDbRows: NotionPage[] = [];
-                  if (dbTreeNode && dbTreeNode.children && dbTreeNode.children.length > 0) {
-                    const selectedRowIds = new Set(dbTreeNode.children.filter(c => selected.has(c.id)).map(c => c.id));
-                    exportDbRows = dbRows.filter(row => selectedRowIds.has(row.id));
+                  const dbTreeNode = flatNodes.find((n) => n.id === block.id);
+                  if (dbTreeNode) {
+                    let exportDbRows: NotionPage[] = [];
+                    if (dbTreeNode.children && dbTreeNode.children.length > 0) {
+                      exportDbRows = dbTreeNode.children
+                        .filter((c) => selected.has(c.id) && c.page)
+                        .map((c) => c.page!);
+                    }
+                    items.push({
+                      kind: "database",
+                      id: block.id,
+                      title: dbTreeNode.title ?? block.child_database?.title ?? "Untitled database",
+                      rows: exportDbRows,
+                      columns: dbTreeNode.columns,
+                      columnDetails: dbTreeNode.columnDetails,
+                      viewId: dbTreeNode.viewId,
+                      viewTitle: dbTreeNode.views?.find((view) => view.id === dbTreeNode.viewId)?.title,
+                      properties: dbTreeNode.properties,
+                      depth: (node.depth ?? 0) + 1
+                    });
+                  } else {
+                    items.push({
+                      kind: "database",
+                      id: block.id,
+                      title: block.child_database?.title ?? "Untitled database",
+                      rows: [],
+                      depth: (node.depth ?? 0) + 1
+                    });
                   }
-
-                  items.push({
-                    kind: "database",
-                    id: block.id,
-                    title: block.child_database?.title ?? "Untitled database",
-                    rows: exportDbRows,
-                    columns: dbMetadata.columns,
-                    columnDetails: dbMetadata.columnDetails ?? dbTreeNode?.columnDetails,
-                    viewId: dbTreeNode?.viewId,
-                    viewTitle: dbTreeNode?.views?.find((view) => view.id === dbTreeNode.viewId)?.title,
-                    properties: dbMetadata.properties,
-                    depth: (node.depth ?? 0) + 2
-                  });
                 }
               }
 
@@ -580,7 +549,7 @@ export default function Page() {
           if (rowAlreadyInSelectedTable && !blocks.length && !hasSelectedChildren) {
              // Skip — pure leaf row, rendered only in the parent table
           } else {
-             items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth + 1 });
+             items.push({ kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
           }
         }
         
@@ -689,9 +658,6 @@ export default function Page() {
                           className={`rounded px-2.5 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
                           onClick={() => {
                             if (option !== depth) {
-                              if (detected) {
-                                setLoadingTree(true);
-                              }
                               setDepth(option);
                             }
                           }}
@@ -739,17 +705,24 @@ export default function Page() {
                     </button>
                   )}
                 </div>
+                {detected && flatNodes.length > 0 && (
+                  <>
+                    <button type="button" className="flex items-center justify-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
+                    <button type="button" className="flex items-center justify-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:opacity-50" onClick={deselectAll} disabled={!flatNodes.length}>Deselect All</button>
+                  </>
+                )}
                 <button 
+                  type="submit"
                   className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]" 
                   disabled={loadingTree || !url.trim()}
                 >
-                  {loadingTree && !detected ? (
+                  {loadingTree ? (
                     <>
                       <RefreshCw className="h-4 w-4 animate-spin" />
                       <span>Fetching...</span>
                     </>
                   ) : (
-                    "Fetch"
+                    detected ? "Refetch" : "Fetch"
                   )}
                 </button>
                 {loadingTree && (
@@ -762,67 +735,72 @@ export default function Page() {
                     Cancel
                   </button>
                 )}
+                {activeToken && selected.size > 0 && (
+                  <button 
+                    type="button"
+                    className="flex items-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-400" 
+                    onClick={runExport} 
+                    disabled={exporting}
+                  >
+                    {exporting ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                        <span>Preparing...</span>
+                      </>
+                    ) : (
+                      <span>Export ({selected.size})</span>
+                    )}
+                  </button>
+                )}
               </div>
               
               {urlHistory.length > 0 && !detected && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <History className="h-4 w-4 text-zinc-400" />
                   <span className="text-xs text-zinc-500">Recent:</span>
-                  {urlHistory.map((item, i) => (
-                    <div key={i} className="group relative flex items-center">
-                      <button
-                        type="button"
-                        onClick={() => setUrl(item.url)}
-                        className="flex items-center gap-1.5 rounded-l border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50"
-                        title={item.url}
-                      >
-                        <span className="font-bold text-zinc-400 uppercase text-[10px]">
-                          {item.type === 'page' ? 'P' : item.type === 'database' || item.type === 'data_source' ? 'D' : '?'}
-                        </span>
-                        <span className="max-w-[150px] truncate">{item.title || item.url}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeUrlHistory(i)}
-                        className="flex items-center justify-center rounded-r border-y border-r border-zinc-200 bg-white px-1.5 py-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-500 hover:border-red-200"
-                        title="Remove from history"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
+                    {urlHistory.map((item, i) => (
+                      <div key={i} className="group relative flex h-7 items-stretch rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden transition-colors hover:border-zinc-300">
+                        <button
+                          type="button"
+                          onClick={() => setUrl(item.url)}
+                          className="inline-flex flex-1 items-center gap-1.5 bg-white px-2.5 text-xs text-zinc-600 transition hover:bg-zinc-50 border-r border-zinc-100"
+                          title={item.url}
+                        >
+                          <span className="flex items-center justify-center text-zinc-400">
+                            {item.type === 'page' ? <FileText className="h-3.5 w-3.5" /> : item.type === 'database' ? <Database className="h-3.5 w-3.5" /> : item.type === 'data_source' ? <Table2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                          </span>
+                          <span className="max-w-[150px] truncate">{item.title || item.url}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeUrlHistory(i)}
+                          className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-red-50 hover:text-red-500"
+                          title="Remove from history"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
                   ))}
                 </div>
               )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {detected && <span className="rounded bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">{detected.type.replace("_", " ")} · {detected.title}</span>}
+                {detected && (
+                  <span className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
+                    {detected.type === "page" ? <FileText className="h-3.5 w-3.5" /> : detected.type === "database" ? <Database className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
+                    {detected.type.replace("_", " ")} · {detected.title}
+                  </span>
+                )}
+                {relativeTime && (
+                  <span className="ml-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                    Fetched {relativeTime}
+                  </span>
+                )}
                 {error && <span className="rounded bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
               </div>
             </form>
 
-            {detected && (
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={handleRefresh}
-                    className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:bg-zinc-50"
-                    title="Refresh (Clear Cache)"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${loadingTree ? 'animate-spin text-zinc-900' : ''}`} />
-                  </button>
-                  {relativeTime && (
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-                      Fetched {relativeTime}
-                    </span>
-                  )}
-                </div>
-                
-                <div className="flex gap-2">
-                  <button className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
-                  <button className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 disabled:opacity-50" onClick={deselectAll} disabled={!flatNodes.length}>Deselect All</button>
-                </div>
-              </div>
-            )}
+
 
             {detected && (
               <FinderTree 
@@ -837,30 +815,6 @@ export default function Page() {
         )}
       </div>
 
-      {activeToken && selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 border-t border-zinc-200 bg-white/90 backdrop-blur-md px-6 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="w-full flex items-center justify-between gap-3">
-            <div className="text-sm font-medium text-zinc-700">
-              <span className="inline-block rounded-full bg-zinc-100 px-2.5 py-0.5 text-zinc-900 mr-1.5">{selected.size}</span>
-              items selected
-            </div>
-            <button 
-              className="flex items-center gap-2 rounded-md bg-zinc-900 px-6 py-2.5 text-sm font-medium text-white shadow-md transition hover:bg-zinc-800 active:scale-95 hover:shadow-lg disabled:bg-zinc-400" 
-              onClick={runExport} 
-              disabled={exporting}
-            >
-              {exporting ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin text-white" />
-                  <span>Preparing...</span>
-                </>
-              ) : (
-                "Export"
-              )}
-            </button>
-          </div>
-        </div>
-      )}
 
       <TokenManager open={managerOpen} tokens={tokens} activeLabel={activeLabel} onClose={() => setManagerOpen(false)} onChange={refreshTokens} />
       
@@ -902,6 +856,7 @@ function treeCacheKey(id: string, depth: DepthOption, viewId?: string): string {
 }
 
 function depthValue(depth: DepthOption): number {
+  if (depth === "Surface") return 0;
   return depth === "All" ? Infinity : Number(depth);
 }
 
@@ -999,7 +954,12 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       if (node.depth + 1 > maxDepth) return node;
       
       if (!node.children) {
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, node.previewColumns);
+        const previewColumns = node.previewColumns && node.previewColumns.length > 0
+          ? node.previewColumns
+          : (node.selectedColumns && node.selectedColumns.length > 0
+            ? node.selectedColumns
+            : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns);
         node.children = rows;
       }
       
@@ -1014,15 +974,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
 async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[]): Promise<TreeNodeData[]> {
   const rows = await memoRows(token, dataSourceId, kind, viewId, memo);
   return rows.map((row) => {
-    let title = "";
-    if (previewColumns && previewColumns.length > 0) {
-      title = previewColumns
-        .map(col => propertyValue(row.properties?.[col], { showIdForRelationRollup: memo.showIdForRelationRollup }))
-        .filter(Boolean)
-        .join(" · ");
-    } else {
-      title = firstTitleProperty(row);
-    }
+    const title = rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup);
     return {
       id: row.id,
       title: title || "Untitled",
@@ -1111,6 +1063,23 @@ function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () =
 function resolveRowSourceKind(containerId: string, dataSourceId: string | undefined, kind: "database" | "data_source"): "database" | "data_source" {
   if (dataSourceId && dataSourceId !== containerId) return "data_source";
   return kind === "data_source" ? "data_source" : "database";
+}
+
+function rowDisplayTitle(row: NotionPage, preferredColumns?: string[], showIdForRelationRollup?: boolean): string {
+  const preferredParts = (preferredColumns ?? [])
+    .map((column) => propertyValue(row.properties?.[column], { showIdForRelationRollup }))
+    .filter(Boolean);
+
+  if (preferredParts.length > 0) return preferredParts.join(" · ");
+
+  const title = firstTitleProperty(row);
+  if (title && title !== "Untitled page") return title;
+
+  const fallback = Object.values(row.properties ?? {})
+    .map((prop) => propertyValue(prop, { showIdForRelationRollup }))
+    .find(Boolean);
+
+  return fallback || "Untitled";
 }
 
 type ApiFetchOptions = {
@@ -1224,6 +1193,7 @@ function errorMessage(error: unknown): string {
 }
 
 function shouldFetchPageContent(node: TreeNodeData, currentDepth: DepthOption): boolean {
+  if (currentDepth === "Surface") return false;
   if (node.kind === "row") {
     if (currentDepth === "All") return true;
     return Number(currentDepth) > node.depth;
