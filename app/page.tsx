@@ -12,6 +12,7 @@ import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notio
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
 import { History, RefreshCw, LogOut, X } from "lucide-react";
+import Image from "next/image";
 
 type DepthOption = "1" | "2" | "3" | "4" | "5" | "All";
 
@@ -635,13 +636,16 @@ export default function Page() {
     <main className="min-h-screen pb-24 bg-zinc-50">
       <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
-          <div className="cursor-pointer select-none" onClick={clearWork} title="Start over">
-            <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
-            <p className="text-xs font-medium text-zinc-500">
-              {activeToken?.workspaceName 
-                ? `${activeToken.workspaceName} (${activeToken.label})` 
-                : activeToken?.label ?? "No active workspace"}
-            </p>
+          <div className="cursor-pointer select-none flex items-center gap-2.5" onClick={clearWork} title="Start over">
+            <Image src="/favicon.png" alt="Notionpull logo" width={28} height={28} className="rounded-md" />
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
+              <p className="text-xs font-medium text-zinc-500">
+                {activeToken?.workspaceName 
+                  ? `${activeToken.workspaceName} (${activeToken.label})` 
+                  : activeToken?.label ?? "No active workspace"}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
             <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
