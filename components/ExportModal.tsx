@@ -94,10 +94,248 @@ export function ExportModal({ open, items, titleById, onClose, showIdForRelation
           </div>
         </div>
         
-        <pre className="flex-1 overflow-auto bg-zinc-950 p-6 text-sm leading-relaxed text-zinc-100 md:rounded-b-xl">
-          <code>{output}</code>
+        <pre className="flex-1 overflow-auto bg-zinc-950 p-6 text-xs font-mono leading-relaxed text-zinc-100 md:rounded-b-xl">
+          <code><HighlightedCode text={output} /></code>
         </pre>
       </div>
     </div>
   );
 }
+
+function HighlightedCode({ text }: { text: string }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [clickedIndex, setClickedIndex] = useState<number | null>(null);
+
+  // Parse lines into text/tag parts
+  const parsedLines = useState(() => {
+    // Tag pairing scanner
+    const tagRegex = /<(\/?)([a-zA-Z0-9_\-]+)([^>]*?)(\/?)>/g;
+    const tagInfos: { tagIndex: number; pairTagIndex?: number; name: string; type: "start" | "end" | "self-closing" }[] = [];
+    const stack: { name: string; tagIndex: number }[] = [];
+    let tagCounter = 0;
+
+    const tagsAtPositions: { start: number; end: number; info: typeof tagInfos[number] }[] = [];
+
+    let match;
+    while ((match = tagRegex.exec(text)) !== null) {
+      const isEnd = match[1] === "/";
+      const name = match[2];
+      const isSelfClosing = match[4] === "/";
+      const tagIndex = tagCounter++;
+
+      const info: any = { tagIndex, name, type: isSelfClosing ? "self-closing" : isEnd ? "end" : "start" };
+      tagInfos.push(info);
+      tagsAtPositions.push({ start: match.index, end: tagRegex.lastIndex, info });
+
+      if (!isSelfClosing) {
+        if (isEnd) {
+          let foundIndex = -1;
+          for (let i = stack.length - 1; i >= 0; i--) {
+            if (stack[i].name === name) {
+              foundIndex = i;
+              break;
+            }
+          }
+          if (foundIndex !== -1) {
+            const startTag = stack[foundIndex];
+            stack.splice(foundIndex, 1);
+            info.pairTagIndex = startTag.tagIndex;
+            tagInfos[startTag.tagIndex].pairTagIndex = tagIndex;
+          }
+        } else {
+          stack.push({ name, tagIndex });
+        }
+      }
+    }
+
+    const lines = text.split("\n");
+    let absoluteCharIndex = 0;
+
+    return lines.map((line) => {
+      const lineParts: any[] = [];
+      const lineStartAbs = absoluteCharIndex;
+      const lineEndAbs = absoluteCharIndex + line.length;
+
+      const tagsInLine = tagsAtPositions.filter(
+        (t) => t.start >= lineStartAbs && t.end <= lineEndAbs
+      );
+
+      let lastIndexInLine = 0;
+      for (const tag of tagsInLine) {
+        const relativeStart = tag.start - lineStartAbs;
+        const relativeEnd = tag.end - lineStartAbs;
+
+        if (relativeStart > lastIndexInLine) {
+          lineParts.push({
+            type: "text",
+            text: line.substring(lastIndexInLine, relativeStart),
+          });
+        }
+
+        lineParts.push({
+          type: "tag",
+          tagIndex: tag.info.tagIndex,
+          pairTagIndex: tag.info.pairTagIndex,
+          tagName: tag.info.name,
+          tagType: tag.info.type,
+          rawText: line.substring(relativeStart, relativeEnd),
+        });
+
+        lastIndexInLine = relativeEnd;
+      }
+
+      if (lastIndexInLine < line.length) {
+        lineParts.push({
+          type: "text",
+          text: line.substring(lastIndexInLine),
+        });
+      }
+
+      absoluteCharIndex += line.length + 1; // +1 for the newline
+      return lineParts;
+    });
+  })[0];
+
+  return (
+    <>
+      {parsedLines.map((lineParts, idx) => {
+        // Simple Markdown lines
+        if (lineParts.length === 1 && lineParts[0].type === "text") {
+          const line = lineParts[0].text;
+          let content: React.ReactNode = line;
+          
+          if (line.trim().startsWith("<!--") && line.trim().endsWith("-->")) {
+            content = <span className="text-zinc-500 italic">{line}</span>;
+          } else if (line.startsWith("#")) {
+            content = <span className="text-blue-400 font-bold">{line}</span>;
+          } else if (line === "---") {
+            content = <span className="text-zinc-600 font-bold">{line}</span>;
+          } else if (/^\s*-\s+\[.*\]/.test(line)) {
+            const match = line.match(/^(\s*-\s+\[)([^\]]+)(\]\s+)(.*)$/);
+            if (match) {
+              const [, indentDash, kind, closeBracket, rest] = match;
+              content = (
+                <span>
+                  <span className="text-zinc-500">{indentDash}</span>
+                  <span className="text-amber-400 font-medium">{kind}</span>
+                  <span className="text-zinc-500">{closeBracket}</span>
+                  <span className="text-zinc-200">{rest}</span>
+                </span>
+              );
+            }
+          }
+
+          return (
+            <div key={idx} className="min-h-[1.25rem] whitespace-pre">
+              {content}
+            </div>
+          );
+        }
+
+        // Mixed/XML tag lines
+        return (
+          <div key={idx} className="min-h-[1.25rem] whitespace-pre">
+            {lineParts.map((part, pIdx) => {
+              if (part.type === "text") {
+                return <span key={pIdx}>{part.text}</span>;
+              }
+
+              const isHighlighted = 
+                hoveredIndex === part.tagIndex || 
+                (hoveredIndex !== null && hoveredIndex === part.pairTagIndex) ||
+                clickedIndex === part.tagIndex ||
+                (clickedIndex !== null && clickedIndex === part.pairTagIndex);
+
+              return (
+                <HighlightedTag
+                  key={pIdx}
+                  part={part}
+                  isActive={isHighlighted}
+                  onHover={() => {
+                    if (part.tagType !== "self-closing") {
+                      setHoveredIndex(part.tagIndex);
+                    }
+                  }}
+                  onLeave={() => {
+                    setHoveredIndex(null);
+                  }}
+                  onClick={() => {
+                    if (part.tagType !== "self-closing") {
+                      setClickedIndex(clickedIndex === part.tagIndex ? null : part.tagIndex);
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function HighlightedTag({ 
+  part, 
+  isActive, 
+  onHover, 
+  onLeave, 
+  onClick 
+}: { 
+  part: any; 
+  isActive: boolean; 
+  onHover: () => void; 
+  onLeave: () => void; 
+  onClick: () => void; 
+}) {
+  const text = part.rawText;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  
+  const tagRegex = /(<\/?[a-zA-Z0-9_\-]+)|(\/?>)|([a-zA-Z0-9_\-]+)\s*=\s*("[^"]*")|(".*?")/g;
+  let match;
+  
+  while ((match = tagRegex.exec(text)) !== null) {
+    const matchIndex = match.index;
+    if (matchIndex > lastIndex) {
+      parts.push(text.substring(lastIndex, matchIndex));
+    }
+    
+    if (match[1]) {
+      parts.push(<span key={matchIndex} className="text-emerald-400 font-medium">{match[1]}</span>);
+    } else if (match[2]) {
+      parts.push(<span key={matchIndex} className="text-emerald-400 font-medium">{match[2]}</span>);
+    } else if (match[3] && match[4]) {
+      parts.push(
+        <span key={matchIndex}>
+          <span className="text-purple-300">{match[3]}</span>
+          <span className="text-zinc-400">=</span>
+          <span className="text-orange-300">{match[4]}</span>
+        </span>
+      );
+    } else if (match[5]) {
+      parts.push(<span key={matchIndex} className="text-orange-300">{match[5]}</span>);
+    }
+    
+    lastIndex = tagRegex.lastIndex;
+  }
+  
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return (
+    <span
+      className={`cursor-pointer transition-all duration-150 rounded px-0.5 ${
+        isActive 
+          ? "bg-yellow-500/25 ring-1 ring-yellow-400/50 text-yellow-100 font-bold" 
+          : "hover:bg-zinc-800"
+      }`}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      onClick={onClick}
+    >
+      {parts}
+    </span>
+  );
+}
+
