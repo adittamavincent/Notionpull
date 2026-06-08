@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import LocatorInit from "@/components/LocatorInit";
 
 export const metadata: Metadata = {
   title: "Notionpull",
@@ -13,7 +14,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {process.env.NODE_ENV === "development" && <LocatorInit />}
+        {children}
+      </body>
     </html>
   );
 }
