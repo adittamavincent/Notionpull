@@ -50,7 +50,7 @@ export function exportMarkdown(items: ExportItem[], options: ExportOptions = {})
   definitionOutputs.push("# Definition");
   
   for (const db of uniqueDbs.values()) {
-    definitionOutputs.push(databaseToXml(db, options));
+    definitionOutputs.push(databaseToMarkdownTable(db, options));
   }
   
   for (const page of uniquePages.values()) {
@@ -123,41 +123,51 @@ function getHeadingLevel(depth?: number) {
   return Math.min(6, (depth ?? 0) + 2);
 }
 
-function databaseToXml(item: DatabaseExportItem, options: ExportOptions): string {
+function databaseToMarkdownTable(item: DatabaseExportItem, options: ExportOptions): string {
   const columns = databaseColumns(item);
-  const attrs = [`title="${escapeXmlAttribute(item.title)}"`];
-  if (item.id) attrs.unshift(`id="${escapeXmlAttribute(item.id)}"`);
-  attrs.push(`kind="${escapeXmlAttribute(item.kind)}"`);
-  attrs.push(`display="table"`);
-  if (item.depth !== undefined) attrs.push(`depth="${item.depth}"`);
-
-  const lines = [`<database ${attrs.join(" ")}>`];
-  lines.push("<meta>");
-  if (item.id) lines.push(`<id>${escapeXmlText(item.id)}</id>`);
+  
+  const xmlLines = [`<database name="${escapeXmlAttribute(item.title)}">`];
+  xmlLines.push("  <meta>");
+  if (item.id) xmlLines.push(`    <id>${escapeXmlText(item.id)}</id>`);
   const viewLine = getViewLine(item);
-  if (viewLine) lines.push(`<view id="${escapeXmlAttribute(item.viewId ?? "")}" title="${escapeXmlAttribute(item.viewTitle ?? "")}">${escapeXmlText(viewLine)}</view>`);
-  lines.push(`<page-count>${item.rows.length}</page-count>`);
-  lines.push("</meta>");
+  if (viewLine) xmlLines.push(`    <view id="${escapeXmlAttribute(item.viewId ?? "")}" title="${escapeXmlAttribute(item.viewTitle ?? "")}">${escapeXmlText(viewLine)}</view>`);
+  xmlLines.push(`    <page-count>${item.rows.length}</page-count>`);
+  xmlLines.push("  </meta>");
 
-  lines.push("<schema>");
+  xmlLines.push("  <schema>");
   for (const column of columns) {
-    lines.push(columnSchemaXml(item, column));
+    xmlLines.push(indent(columnSchemaXml(item, column), 2));
   }
-  lines.push("</schema>");
+  xmlLines.push("  </schema>");
 
   if (!columns.length || item.rows.length === 0) {
-    lines.push("<pages />");
-    lines.push("</database>");
-    return lines.join("\n");
+    xmlLines.push("  *(Empty database)*");
+  } else {
+    const colHeaders = columns.map(col => {
+      const prop = item.properties?.[col];
+      const type = prop?.type ?? "unknown";
+      return `${col} (${type})`;
+    });
+
+    const tableLines = [
+      `  | ID | ${colHeaders.join(" | ")} |`,
+      `  | --- | ${columns.map(() => "---").join(" | ")} |`
+    ];
+
+    for (const row of item.rows) {
+      const cells = columns.map(col => {
+        const prop = row.properties?.[col];
+        return escapeMarkdown(propertyValue(prop, options));
+      });
+      tableLines.push(`  | ${row.id} | ${cells.join(" | ")} |`);
+    }
+
+    xmlLines.push(tableLines.join("\n"));
   }
 
-  lines.push(`<pages display="table">`);
-  for (const row of item.rows) {
-    lines.push(pageRowToXml(row, columns, options));
-  }
-  lines.push("</pages>");
-  lines.push("</database>");
-  return lines.join("\n");
+  xmlLines.push("</database>");
+
+  return xmlLines.join("\n");
 }
 
 function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
@@ -192,17 +202,6 @@ function propertyOptions(prop: any): string[] {
   if (prop.type === "multi_select") return prop.multi_select?.options?.map((o: any) => o.name).filter(Boolean) ?? [];
   if (prop.type === "status") return prop.status?.options?.map((o: any) => o.name).filter(Boolean) ?? [];
   return [];
-}
-
-function pageRowToXml(row: NotionPage, columns: string[], options: ExportOptions): string {
-  const lines = [`<page id="${escapeXmlAttribute(row.id)}" title="${escapeXmlAttribute(pageTitle(row) || "Untitled Entry")}">`];
-  for (const column of columns) {
-    const prop = row.properties?.[column];
-    const type = prop?.type ?? "unknown";
-    lines.push(`<property name="${escapeXmlAttribute(column)}" type="${escapeXmlAttribute(type)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
-  }
-  lines.push("</page>");
-  return lines.join("\n");
 }
 
 function getViewLine(item: DatabaseExportItem): string {

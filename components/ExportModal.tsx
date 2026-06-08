@@ -267,6 +267,45 @@ export function HighlightedCode({ text }: { text: string }) {
                 </span>
               );
             }
+          } else if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+            const leadingWhitespaceMatch = line.match(/^(\s*)/);
+            const indentStr = leadingWhitespaceMatch ? leadingWhitespaceMatch[1] : "";
+            const trimmedLine = line.trim();
+            const cells = trimmedLine.split(/(?<!\\)\|/);
+            const isSeparator = cells.slice(1, -1).every((cell: string) => /^\s*:?-+:?\s*$/.test(cell));
+            if (isSeparator) {
+              content = <span className="text-zinc-600">{line}</span>;
+            } else {
+              const colors = [
+                "text-red-400",
+                "text-orange-400",
+                "text-yellow-300",
+                "text-emerald-400",
+                "text-cyan-400",
+                "text-blue-400",
+                "text-indigo-400",
+                "text-purple-400",
+                "text-pink-400"
+              ];
+              content = (
+                <span>
+                  {indentStr}
+                  {cells.map((cell: string, cellIdx: number) => {
+                    if (cellIdx === 0) return null;
+                    if (cellIdx === cells.length - 1) {
+                      return <span key={cellIdx} className="text-zinc-600">|</span>;
+                    }
+                    const colorClass = colors[(cellIdx - 1) % colors.length];
+                    return (
+                      <span key={cellIdx}>
+                        <span className="text-zinc-600">|</span>
+                        <span className={colorClass}>{cell}</span>
+                      </span>
+                    );
+                  })}
+                </span>
+              );
+            }
           }
 
           return (
