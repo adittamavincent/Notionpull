@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Copy, Download, X, Check } from "lucide-react";
 import { exportMarkdown, type ExportItem } from "@/lib/export";
 
@@ -102,12 +102,12 @@ export function ExportModal({ open, items, titleById, onClose, showIdForRelation
   );
 }
 
-function HighlightedCode({ text }: { text: string }) {
+export function HighlightedCode({ text }: { text: string }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [clickedIndex, setClickedIndex] = useState<number | null>(null);
 
   // Parse lines into text/tag parts
-  const parsedLines = useState(() => {
+  const parsedLines = useMemo(() => {
     // Tag pairing scanner
     const tagRegex = /<(\/?)([a-zA-Z0-9_\-]+)([^>]*?)(\/?)>/g;
     const tagInfos: { tagIndex: number; pairTagIndex?: number; name: string; type: "start" | "end" | "self-closing" }[] = [];
@@ -194,7 +194,7 @@ function HighlightedCode({ text }: { text: string }) {
       absoluteCharIndex += line.length + 1; // +1 for the newline
       return lineParts;
     });
-  })[0];
+  }, [text]);
 
   return (
     <>

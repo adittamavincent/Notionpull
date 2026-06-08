@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Activity, RefreshCw, Trash2, ChevronRight, ChevronDown, TerminalSquare, Copy, Check } from "lucide-react";
 import type { LogEntry } from "@/lib/logger";
+import { HighlightedCode } from "./ExportModal";
 
 type DebugViewMode = "chronological" | "tree";
 type LogCopyMode = "surface" | "full";
@@ -402,7 +403,9 @@ function TreeBranch({
                     </button>
                   </div>
                   <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
-                    <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(node.log)}</pre>
+                    <pre className={isError ? "text-red-300" : "text-zinc-300"}>
+                      <code><HighlightedCode text={formatResponseJson(node.log)} /></code>
+                    </pre>
                   </div>
                 </div>
               </div>
@@ -839,7 +842,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
                               </button>
                             </div>
                             <div className="h-full max-h-[220px] overflow-x-auto rounded border border-white/5 bg-black/50 p-2 font-mono text-[10px]">
-                              <pre className={isError ? "text-red-300" : "text-zinc-300"}>{formatResponseJson(log)}</pre>
+                              <pre className={isError ? "text-red-300" : "text-zinc-300"}>
+                                <code><HighlightedCode text={formatResponseJson(log)} /></code>
+                              </pre>
                             </div>
                           </div>
                         </div>
