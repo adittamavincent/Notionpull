@@ -18,8 +18,8 @@ export async function GET(request: Request, { params }: Params) {
     // Resolve link_to_page and child_database blocks in parallel
     const linkToPageBlocks = blocks.filter((block) => block.type === "link_to_page");
     const childDbBlocks = blocks.filter((block) => block.type === "child_database");
-    const resolvedLinks = new Map<string, { targetId: string; targetType: "database" | "page"; title: string; dataSourceName?: string }>();
-    const resolvedDbs = new Map<string, { title: string; dataSourceName?: string }>();
+    const resolvedLinks = new Map<string, { targetId: string; targetType: "database" | "page"; title: string; dataSourceName?: string; isLinkedDatabase?: boolean }>();
+    const resolvedDbs = new Map<string, { title: string; dataSourceName?: string; isLinkedDatabase?: boolean }>();
 
     const promises: Promise<any>[] = [];
 
@@ -41,7 +41,8 @@ export async function GET(request: Request, { params }: Params) {
               targetId: actualDbId,
               targetType: "database",
               title: actualInfo.title,
-              dataSourceName: actualInfo.dataSourceName
+              dataSourceName: actualInfo.dataSourceName,
+              isLinkedDatabase: !!actualInfo.dataSourceId && actualInfo.dataSourceId !== targetId
             });
           } else {
             const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
@@ -68,7 +69,8 @@ export async function GET(request: Request, { params }: Params) {
           const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
           resolvedDbs.set(block.id, {
             title: actualInfo.title,
-            dataSourceName: actualInfo.dataSourceName
+            dataSourceName: actualInfo.dataSourceName,
+            isLinkedDatabase: !!actualInfo.dataSourceId && actualInfo.dataSourceId !== block.id
           });
         } catch {}
       }));
@@ -87,6 +89,7 @@ export async function GET(request: Request, { params }: Params) {
           let hasChildren = block.has_children;
 
           let dataSourceName: string | undefined = undefined;
+          let isLinkedDatabase: boolean | undefined = undefined;
 
           if (block.type === "link_to_page") {
             const resolved = resolvedLinks.get(block.id);
@@ -96,6 +99,7 @@ export async function GET(request: Request, { params }: Params) {
               title = resolved.title;
               dataSourceName = resolved.dataSourceName;
               hasChildren = resolved.targetType === "database" ? true : block.has_children;
+              isLinkedDatabase = resolved.isLinkedDatabase;
             }
           }
 
@@ -104,6 +108,7 @@ export async function GET(request: Request, { params }: Params) {
             if (resolved) {
               title = resolved.title;
               dataSourceName = resolved.dataSourceName;
+              isLinkedDatabase = resolved.isLinkedDatabase;
             }
           }
 
@@ -120,7 +125,8 @@ export async function GET(request: Request, { params }: Params) {
             kind: dbMentionId ? "database" : block.type,
             title,
             hasChildren,
-            dataSourceName
+            dataSourceName,
+            isLinkedDatabase
           };
         })
         .filter((node) => {
