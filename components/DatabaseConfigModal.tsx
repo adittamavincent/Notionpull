@@ -12,9 +12,10 @@ type Props = {
   onClose: () => void;
   onSave: (nodeId: string, selectedColumns: string[], previewColumns?: string[]) => void;
   showIdForRelationRollup?: boolean;
+  maxChildren?: number;
 };
 
-export function DatabaseConfigModal({ open, token, node, onClose, onSave, showIdForRelationRollup }: Props) {
+export function DatabaseConfigModal({ open, token, node, onClose, onSave, showIdForRelationRollup, maxChildren }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fetchedRows, setFetchedRows] = useState<NotionPage[]>([]);
   const [titleById, setTitleById] = useState<Map<string, string>>(new Map());
@@ -98,19 +99,25 @@ export function DatabaseConfigModal({ open, token, node, onClose, onSave, showId
       setLoading(true);
       const dataSourceId = node.dataSourceId ?? node.id;
       const kind = dataSourceId !== node.id ? "data_source" : (node.kind === "data_source" ? "data_source" : "database");
-      fetch(`/api/notion/datasource/${dataSourceId}/rows?kind=${encodeURIComponent(kind)}`, {
+      const qs = new URLSearchParams({ kind });
+      if (maxChildren !== undefined && maxChildren > 0) qs.set("page_size", String(Math.min(maxChildren, 100)));
+      fetch(`/api/notion/datasource/${dataSourceId}/rows?${qs.toString()}`, {
         headers: { "x-notion-token": token }
       })
         .then(res => res.json())
         .then(data => {
           if (data && data.results) {
-            setFetchedRows(data.results);
+            let resRows = data.results;
+            if (maxChildren !== undefined && maxChildren > 0 && resRows.length > maxChildren) {
+              resRows = resRows.slice(0, maxChildren);
+            }
+            setFetchedRows(resRows);
           }
         })
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [open, node, token, nodeRows.length, fetchedRows.length]);
+  }, [open, node, token, nodeRows.length, fetchedRows.length, maxChildren]);
 
   useEffect(() => {
     if (!open || !token || rows.length === 0) return;

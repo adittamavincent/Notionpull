@@ -44,6 +44,7 @@ export default function Page() {
 
   const [showRelationIds, setShowRelationIds] = useState(false);
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
+  const [maxChildren, setMaxChildren] = useState<number>(5);
 
   // Load from localStorage on mount to avoid hydration mismatch
   useEffect(() => {
@@ -55,6 +56,10 @@ export default function Page() {
       const savedLinked = localStorage.getItem("notionpull_fetch_linked_children");
       if (savedLinked !== null) {
         setFetchLinkedChildren(savedLinked === "true");
+      }
+      const savedMaxChildren = localStorage.getItem("notionpull_max_children");
+      if (savedMaxChildren !== null) {
+        setMaxChildren(Number(savedMaxChildren));
       }
     } catch {}
   }, []);
@@ -70,6 +75,13 @@ export default function Page() {
     setFetchLinkedChildren(val);
     try {
       localStorage.setItem("notionpull_fetch_linked_children", String(val));
+    } catch {}
+  };
+
+  const handleMaxChildrenChange = (val: number) => {
+    setMaxChildren(val);
+    try {
+      localStorage.setItem("notionpull_max_children", String(val));
     } catch {}
   };
 
@@ -332,6 +344,7 @@ export default function Page() {
         rows: rowsCache.current,
         showIdForRelationRollup: showRelationIds,
         fetchLinkedChildren,
+        maxChildren,
         signal: controller.signal
       });
       
@@ -663,6 +676,20 @@ export default function Page() {
                 
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Max DB Children</span>
+                    <input
+                      type="number"
+                      className="w-16 rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                      value={maxChildren}
+                      onChange={(e) => handleMaxChildrenChange(Math.max(0, parseInt(e.target.value) || 0))}
+                      min="0"
+                      disabled={loadingTree}
+                    />
+                  </div>
+
+                  <div className="hidden sm:block h-5 w-px bg-zinc-300" />
+
+                  <div className="flex items-center gap-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Depth</span>
                     <div className="flex rounded-md border border-zinc-300 bg-zinc-50 p-0.5 shadow-sm">
                       {depthOptions.map((option) => (
@@ -853,6 +880,7 @@ export default function Page() {
         onClose={() => setConfigOpen(false)} 
         onSave={saveDatabaseConfig} 
         showIdForRelationRollup={showRelationIds}
+        maxChildren={maxChildren}
       />
 
       <ExportProgress 
@@ -922,6 +950,7 @@ type BuildMemo = {
   rows: Map<string, Promise<NotionPage[]>>;
   showIdForRelationRollup?: boolean;
   fetchLinkedChildren?: boolean;
+  maxChildren?: number;
   signal?: AbortSignal;
 };
 
@@ -1081,7 +1110,7 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
 }
 
 function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo): Promise<NotionPage[]> {
-  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }));
+  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, memo.maxChildren));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -1127,17 +1156,24 @@ let notionClientQueue: Promise<void> = Promise.resolve();
 let notionClientBlockedUntil = 0;
 const NOTION_MIN_REQUEST_SPACING_MS = 375;
 
-async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId?: string, onProgress?: (count: number) => void, options: ApiFetchOptions = {}): Promise<NotionPage[]> {
+async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId?: string, onProgress?: (count: number) => void, options: ApiFetchOptions = {}, maxChildren?: number): Promise<NotionPage[]> {
   const rows: NotionPage[] = [];
   let cursor: string | null = null;
   do {
     const qs = new URLSearchParams({ kind });
     if (cursor) qs.set("cursor", cursor);
     if (viewId) qs.set("viewId", viewId);
+    if (maxChildren !== undefined && maxChildren > 0) {
+      qs.set("page_size", String(Math.min(maxChildren - rows.length, 100)));
+    }
     const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows?${qs.toString()}`, options);
     rows.push(...body.results);
     cursor = body.has_more ? body.next_cursor : null;
     if (onProgress) onProgress(rows.length);
+    if (maxChildren !== undefined && maxChildren > 0 && rows.length >= maxChildren) {
+      rows.length = maxChildren;
+      break;
+    }
   } while (cursor);
   return rows;
 }

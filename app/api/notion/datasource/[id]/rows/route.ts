@@ -9,8 +9,9 @@ export async function GET(request: Request, { params }: Params) {
     const cursor = new URL(request.url).searchParams.get("cursor");
     const kind = new URL(request.url).searchParams.get("kind");
     const viewId = new URL(request.url).searchParams.get("viewId");
+    const pageSizeParam = new URL(request.url).searchParams.get("page_size");
     const traceRoot = `datasource/${params.id}`;
-    const body: Record<string, unknown> = { page_size: 100 };
+    const body: Record<string, unknown> = { page_size: pageSizeParam ? parseInt(pageSizeParam) || 100 : 100 };
     if (cursor) body.start_cursor = cursor;
     let rows: any;
     try {
