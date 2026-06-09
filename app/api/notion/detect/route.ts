@@ -1,4 +1,5 @@
 import { blockTitle, databaseTitle, notionErrorResponse, notionFetch, NotionApiError, pageTitle, traceChild, tokenFromRequest, resolveDatabaseActualTitle } from "@/lib/notion";
+import { getResolvedTitle } from "@/lib/logger";
 import type { NotionDatabase, NotionPage } from "@/types/notion";
 
 export async function GET(request: Request) {
@@ -7,6 +8,7 @@ export async function GET(request: Request) {
     const id = new URL(request.url).searchParams.get("id");
     const viewId = new URL(request.url).searchParams.get("viewId");
     if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
+
     const traceRoot = `detect/${id}`;
 
     // Use a smarter sequential algorithm to avoid 404/400 logs

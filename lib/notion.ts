@@ -29,6 +29,37 @@ export function formatNotionId(input: string): string {
 export function extractNotionIds(input: string): string[] {
   if (!input) return [];
 
+  let urlObj: URL | null = null;
+  try {
+    urlObj = new URL(input);
+  } catch {
+    urlObj = null;
+  }
+
+  if (urlObj) {
+    const ids: string[] = [];
+    const p = urlObj.searchParams.get("p");
+    if (p && /^[0-9a-fA-F]{32}$/.test(p.replace(/-/g, ""))) {
+      ids.push(p);
+    }
+
+    const pathParts = urlObj.pathname.split("/").filter(Boolean);
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart) {
+      const match = lastPart.match(/([0-9a-fA-F]{32})$/);
+      if (match) {
+        ids.push(match[1]);
+      } else {
+        const uuidMatch = lastPart.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+        if (uuidMatch) ids.push(uuidMatch[1]);
+      }
+    }
+
+    if (ids.length > 0) {
+      return Array.from(new Set(ids.map(formatCompactNotionId)));
+    }
+  }
+
   // 1. Look for standard UUIDs (8-4-4-4-12)
   const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
   const uuids = input.match(uuidRegex) ?? [];
@@ -175,12 +206,12 @@ export function getDefaultTitleColumn(properties?: Record<string, any>): string 
 export function blockTitle(block: any): string {
   if (block.type === "child_page") return block.child_page?.title ?? "Untitled page";
   if (block.type === "child_database") return block.child_database?.title ?? "Untitled database";
-  
+
   const content = block[block.type];
   if (content?.rich_text) {
     return plainText(content.rich_text);
   }
-  
+
   if (block.type === "divider") return "Divider";
   if (block.type === "image") return "Image block";
   if (block.type === "video") return "Video block";
@@ -194,7 +225,7 @@ export function blockTitle(block: any): string {
     const cells = block.table_row?.cells ?? [];
     return cells.map((cell: any) => plainText(cell)).filter(Boolean).join(" | ") || "Empty row";
   }
-  
+
   return "";
 }
 
@@ -215,12 +246,12 @@ export async function notionFetch<T>(
   const start = Date.now();
   const requestBody = typeof init.body === "string"
     ? (() => {
-        try {
-          return JSON.parse(init.body);
-        } catch {
-          return init.body;
-        }
-      })()
+      try {
+        return JSON.parse(init.body);
+      } catch {
+        return init.body;
+      }
+    })()
     : undefined;
 
   const logEntry: any = {
@@ -290,6 +321,21 @@ export async function notionFetch<T>(
       } else if (responseBodyJson.object === "list") {
         nameTag = `List (${responseBodyJson.results?.length ?? 0} items)`;
         objectType = "list";
+        if (responseBodyJson.results && Array.isArray(responseBodyJson.results)) {
+          for (const item of responseBodyJson.results) {
+            let itemTitle = "";
+            if (item.object === "page") {
+              itemTitle = pageTitle(item);
+            } else if (item.object === "database") {
+              itemTitle = databaseTitle(item);
+            } else if (item.object === "block") {
+              itemTitle = blockTitle(item);
+            }
+            if (itemTitle && item.id) {
+              saveResolvedTitle(item.id, itemTitle);
+            }
+          }
+        }
       } else if (responseBodyJson.name) {
         nameTag = responseBodyJson.name;
         if (path.includes("/data_sources")) {

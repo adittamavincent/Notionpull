@@ -898,8 +898,8 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     }
   };
 
-  const fetchLogs = async () => {
-    setLoading(true);
+  const fetchLogs = async (isAutoRefresh = false) => {
+    if (!isAutoRefresh) setLoading(true);
     try {
       const res = await fetch(`/api/notion/debug?_t=${Date.now()}`);
       if (res.ok) {
@@ -912,7 +912,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     } catch (err) {
       console.error("Failed to fetch logs", err);
     } finally {
-      setLoading(false);
+      if (!isAutoRefresh) setLoading(false);
     }
   };
 
@@ -933,6 +933,11 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     if (open) {
       clearedAtRef.current = 0;
       fetchLogs();
+
+      const intervalId = setInterval(() => {
+        void fetchLogs(true);
+      }, 1000);
+
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Escape") {
           onClose();
@@ -942,6 +947,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
       window.addEventListener("keydown", handleKeyDown);
       return () => {
         window.removeEventListener("keydown", handleKeyDown);
+        clearInterval(intervalId);
       };
     }
   }, [open, onClose]);
@@ -1030,7 +1036,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
               </>
             )}
             <button 
-              onClick={fetchLogs}
+              onClick={() => void fetchLogs()}
               className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />

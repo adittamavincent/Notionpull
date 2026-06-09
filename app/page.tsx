@@ -186,7 +186,7 @@ export default function Page() {
     try {
       if (!type) return;
       const displayTitle = (title && title.trim()) ? title.trim() : "Untitled";
-      
+
       let hist: HistoryItem[] = [];
       try {
         const saved = localStorage.getItem("notionpull_history_v2");
@@ -196,7 +196,7 @@ export default function Page() {
             hist = parsed;
           }
         }
-      } catch {}
+      } catch { }
 
       const newItem: HistoryItem = { url: newUrl, title: displayTitle, type };
       const updated = [newItem, ...hist.filter((h: HistoryItem) => normalizeUrl(h.url) !== normalizeUrl(newUrl))].slice(0, 10);
@@ -367,6 +367,121 @@ export default function Page() {
     }
   }
 
+  async function refetchUrl(index: number) {
+    if (!activeToken) return;
+    const singleUrl = urls[index]?.trim();
+    if (!singleUrl) return;
+
+    const ids = extractNotionIds(singleUrl);
+    if (!ids.length) {
+      setError("Could not find a valid Notion ID in URL.");
+      return;
+    }
+
+    if (resetLog) {
+      try {
+        await fetch("/api/notion/debug", { method: "DELETE" });
+      } catch (err) {
+        console.error("Failed to reset logs on fetch:", err);
+      }
+    }
+
+    treeAbortRef.current?.abort();
+    const controller = new AbortController();
+    treeAbortRef.current = controller;
+    setError("");
+    setLoadingTree(true);
+
+    try {
+      let viewId = "";
+      try {
+        const parsedUrl = new URL(singleUrl);
+        viewId = parsedUrl.searchParams.get("v") || "";
+      } catch { }
+
+      const results = await Promise.allSettled(
+        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
+      );
+
+      const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
+
+      if (!successful) {
+        const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+        const errMsg = firstError?.reason ? errorMessage(firstError.reason) : `Could not detect any Notion object in URL: ${singleUrl}`;
+        setError(errMsg);
+        setLoadingTree(false);
+        return;
+      }
+
+      const detectedObj = successful.value;
+      saveUrlHistory(singleUrl, detectedObj.title, detectedObj.type);
+
+      // Clear caches to force fresh data fetching
+      pageChildrenCache.current.clear();
+      contentCache.current.clear();
+      databaseCache.current.clear();
+      rowsCache.current.clear();
+      treeCache.current.clear();
+
+      const maxDepth = depthValue(depth);
+      const rootSeed: TreeNodeData = {
+        id: detectedObj.id,
+        title: detectedObj.title,
+        kind: detectedObj.type,
+        depth: 0,
+        viewId: detectedObj.viewId,
+        views: detectedObj.views,
+        columnDetails: detectedObj.columnDetails,
+        dataSourceId: detectedObj.dataSourceId,
+        dataSourceName: detectedObj.dataSourceName,
+        columns: detectedObj.columns,
+        selectedColumns: detectedObj.selectedColumns,
+        properties: detectedObj.properties,
+        isLinkedDatabase: detectedObj.isLinkedDatabase
+      };
+
+      const freshRoot = await buildNode(activeToken.token, rootSeed, maxDepth, {
+        pageChildren: pageChildrenCache.current,
+        databases: databaseCache.current,
+        rows: rowsCache.current,
+        showIdForRelationRollup: showRelationIds,
+        fetchLinkedChildren,
+        maxChildren,
+        signal: controller.signal
+      });
+
+      const cacheKey = treeCacheKey(detectedObj.id, depth, detectedObj.viewId);
+      treeCache.current.set(cacheKey, freshRoot);
+
+      setDetectedList(prev => {
+        const idx = prev.findIndex(d => d.id === detectedObj.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = detectedObj;
+          return next;
+        }
+        return [...prev, detectedObj];
+      });
+
+      setNodes(prev => {
+        const idx = prev.findIndex(n => n.id === freshRoot.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = freshRoot;
+          return next;
+        }
+        return [...prev, freshRoot];
+      });
+
+      setLastFetch(new Date());
+    } catch (err) {
+      if (!isAbortError(err)) setError(errorMessage(err));
+    } finally {
+      if (treeAbortRef.current === controller) treeAbortRef.current = null;
+      setLoadingTree(false);
+    }
+  }
+
   async function loadTree(objects: DetectedObject[] = detectedList, currentDepth: DepthOption = depth, forceRefresh = false, controller?: AbortController) {
     if (!activeToken || !objects.length) return;
     if (!controller) {
@@ -404,13 +519,8 @@ export default function Page() {
       }
     }
 
-    // Clear selection if it's a completely new root set
-    const currentIds = new Set(objects.map(o => o.id));
-    const prevIds = new Set(detectedList.map(o => o.id));
-    const isDifferentSet = objects.length !== detectedList.length || [...currentIds].some(id => !prevIds.has(id));
-    if (isDifferentSet) {
-      setSelected(new Set());
-    }
+    // Always start with empty selection after fetch
+    setSelected(new Set());
 
     try {
       const maxDepth = depthValue(currentDepth);
@@ -441,39 +551,6 @@ export default function Page() {
           signal: controller!.signal
         });
       }));
-
-      const isIncludedInNotion = (n: TreeNodeData): boolean => {
-        const props = n.page?.properties;
-        if (!props) return false;
-        const includeProp = Object.entries(props).find(([name, prop]: [string, any]) => 
-          name.toLowerCase() === "include" && prop?.type === "checkbox" && prop.checkbox === true
-        );
-        return !!includeProp;
-      };
-
-      // Reconcile selection: If a node was already selected, or has Include: true, make sure its children follow
-      setSelected((prev) => {
-        const next = new Set(prev);
-        const seen = new Set<string>();
-
-        const propagate = (n: TreeNodeData, parentSelected: boolean) => {
-          if (seen.has(n.id)) return;
-          seen.add(n.id);
-
-          const hasIncludeProperty = isIncludedInNotion(n);
-          const isSelected = parentSelected || next.has(n.id) || hasIncludeProperty;
-          if (isSelected) next.add(n.id);
-
-          for (const child of n.children ?? []) {
-            propagate(child, isSelected);
-          }
-        };
-
-        for (const root of roots) {
-          propagate(root, next.has(root.id));
-        }
-        return next;
-      });
 
       // Cache each root
       roots.forEach((root, idx) => {
@@ -641,6 +718,9 @@ export default function Page() {
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
                 if (block.type === "child_database") {
+                  const isAlreadySelected = selectedNodes.some(n => n.id === block.id);
+                  if (isAlreadySelected) continue;
+
                   const dbTreeNode = flatNodes.find((n) => n.id === block.id);
                   if (dbTreeNode) {
                     let exportDbRows: NotionPage[] = [];
@@ -821,14 +901,8 @@ export default function Page() {
           <div className="space-y-6">
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 min-w-0 flex-auto">
                   <label className="block text-sm font-medium text-zinc-900">Paste Notion page or database URLs</label>
-                  {detectedList.map((det, index) => (
-                    <span key={index} className="inline-flex items-center gap-1.5 rounded bg-zinc-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-700 shadow-sm">
-                      {det.type === "page" ? <FileText className="h-3 w-3" /> : det.type === "database" ? <Database className="h-3 w-3" /> : <Table2 className="h-3 w-3" />}
-                      {det.type.replace("_", " ")} · {det.title}
-                    </span>
-                  ))}
                   {relativeTime && (
                     <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
                       Fetched {relativeTime}
@@ -837,7 +911,7 @@ export default function Page() {
                   {error && <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 ml-auto">
+                <div className="flex flex-wrap items-center justify-end gap-4 ml-auto min-w-0 flex-auto">
                   {/* Before Fetch Settings */}
                   <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
                     <div className="flex items-center gap-2">
@@ -924,62 +998,84 @@ export default function Page() {
               <div className="flex flex-col lg:flex-row gap-6 items-start justify-between">
                 {/* Left Side: Inputs */}
                 <div className="flex-1 w-full space-y-3">
-                  {urls.map((singleUrl, index) => (
-                    <div key={index} className="flex gap-2 items-center">
-                      <div className="relative flex-1 group">
-                        <input
-                          className={`w-full rounded-md border pl-3.5 pr-10 py-2 text-sm outline-none transition duration-150 ${activeInputIndex === index
-                            ? "border-zinc-950 ring-2 ring-zinc-950/10"
-                            : "border-zinc-300 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                            }`}
-                          value={singleUrl}
-                          onChange={(event) => {
-                            setUrls(prev => {
-                              const next = [...prev];
-                              next[index] = event.target.value;
-                              return next;
-                            });
-                          }}
-                          onFocus={() => setActiveInputIndex(index)}
-                          placeholder="Paste a Notion page or database URL..."
-                        />
-                        {singleUrl && (
-                          <button
-                            type="button"
-                            onClick={() => {
+                  {urls.map((singleUrl, index) => {
+                    const urlIds = extractNotionIds(singleUrl);
+                    const matchedDet = detectedList.find((d) => urlIds.includes(d.id));
+                    return (
+                      <div key={index} className="flex gap-2 items-center">
+                        <div className="relative flex-1 group">
+                          <input
+                            className={`w-full rounded-md border pl-3.5 py-2 text-sm outline-none transition duration-150 ${
+                              matchedDet ? "pr-56" : "pr-3"
+                            } ${activeInputIndex === index
+                              ? "border-zinc-950 ring-2 ring-zinc-950/10"
+                              : "border-zinc-300 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                              }`}
+                            value={singleUrl}
+                            onChange={(event) => {
                               setUrls(prev => {
                                 const next = [...prev];
-                                next[index] = "";
+                                next[index] = event.target.value;
                                 return next;
                               });
                             }}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title="Clear URL"
+                            onFocus={() => setActiveInputIndex(index)}
+                            placeholder="Paste a Notion page or database URL..."
+                          />
+                          {matchedDet && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
+                              <span className="truncate max-w-[120px] font-medium" title={matchedDet.title}>
+                                {matchedDet.title}
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded bg-zinc-100/80 border border-zinc-200/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                                {matchedDet.type === "page" ? (
+                                  <FileText className="h-3 w-3 text-zinc-400" />
+                                ) : matchedDet.type === "database" ? (
+                                  <Database className="h-3 w-3 text-zinc-400" />
+                                ) : (
+                                  <Table2 className="h-3 w-3 text-zinc-400" />
+                                )}
+                                {matchedDet.type.replace("_", " ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {(urls.length > 1 || singleUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (urls.length > 1) {
+                                setUrls(prev => {
+                                  const next = prev.filter((_, i) => i !== index);
+                                  if (activeInputIndex >= next.length) {
+                                    setActiveInputIndex(Math.max(0, next.length - 1));
+                                  }
+                                  return next;
+                                });
+                              } else {
+                                setUrls([""]);
+                              }
+                            }}
+                            className="rounded-md border border-zinc-300 bg-white p-2 text-zinc-500 hover:bg-red-50 hover:text-red-500 transition shadow-sm shrink-0"
+                            title={urls.length > 1 ? "Remove link" : "Clear URL"}
                           >
                             <X className="h-4 w-4" />
                           </button>
                         )}
+                        {singleUrl.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => refetchUrl(index)}
+                            disabled={loadingTree}
+                            className="rounded-md border border-zinc-900 bg-zinc-900 p-2 text-white hover:bg-zinc-800 active:scale-95 transition shadow-sm shrink-0 disabled:bg-zinc-400 disabled:border-zinc-400 disabled:scale-100"
+                            title="Refetch this URL"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                      {urls.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUrls(prev => {
-                              const next = prev.filter((_, i) => i !== index);
-                              if (activeInputIndex >= next.length) {
-                                setActiveInputIndex(Math.max(0, next.length - 1));
-                              }
-                              return next;
-                            });
-                          }}
-                          className="rounded-md border border-zinc-300 bg-white p-2 text-zinc-500 hover:bg-red-50 hover:text-red-500 transition shadow-sm"
-                          title="Remove link"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   <button
                     type="button"
@@ -994,7 +1090,7 @@ export default function Page() {
                 </div>
 
                 {/* Right Side: Action Buttons */}
-                <div className="shrink-0 flex flex-col gap-2 items-stretch lg:pt-1 w-full lg:w-auto">
+                <div className="shrink-0 flex flex-col gap-3 items-stretch w-full lg:w-auto">
                   {loadingTree && (
                     <button
                       type="button"
@@ -1007,7 +1103,7 @@ export default function Page() {
                   )}
                   <button
                     type="submit"
-                    className="flex items-center justify-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]"
+                    className="flex items-center justify-center gap-2 rounded-md border border-transparent bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 disabled:bg-zinc-400 min-w-[100px]"
                     disabled={loadingTree || !urls.some(u => u.trim())}
                   >
                     {loadingTree ? (
@@ -1028,7 +1124,7 @@ export default function Page() {
                   {activeToken && detected && (
                     <button
                       type="button"
-                      className="flex items-center gap-2 rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+                      className="flex items-center justify-center gap-2 rounded-md border border-transparent bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
                       onClick={runExport}
                       disabled={exporting || selected.size === 0}
                     >
@@ -1201,32 +1297,6 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           parentId: node.id,
           dataSourceName: child.dataSourceName
         }));
-
-        if (node.kind === "row" && node.page?.properties) {
-          const allIds = extractNotionIds(JSON.stringify(node.page.properties));
-          const uniqueIds = Array.from(new Set(allIds)).filter(id => id !== node.id && id !== node.parentId);
-          if (uniqueIds.length > 0) {
-            for (const id of uniqueIds) {
-              try {
-                const dp = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, { signal: memo.signal });
-                if (dp.type === "database" || dp.type === "page" || dp.type === "data_source") {
-                  if (!node.children.some(c => c.id === dp.id)) {
-                    node.children.push({
-                      id: dp.id,
-                      title: dp.title,
-                      kind: dp.type as any,
-                      depth: node.depth + 1,
-                      parentId: node.id,
-                      dataSourceName: dp.dataSourceName
-                    });
-                  }
-                }
-              } catch (err) {
-                if (isAbortError(err)) throw err;
-              }
-            }
-          }
-        }
       }
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
@@ -1254,7 +1324,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           : (node.selectedColumns && node.selectedColumns.length > 0
             ? node.selectedColumns
             : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns);
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns, node.id);
         node.children = rows;
       }
 
@@ -1266,8 +1336,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[]): Promise<TreeNodeData[]> {
-  const rows = await memoRows(token, dataSourceId, kind, viewId, memo);
+async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[], containerId?: string): Promise<TreeNodeData[]> {
+  const rows = await memoRows(token, dataSourceId, kind, viewId, memo, containerId);
   return rows.map((row) => {
     const title = rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup);
     return {
@@ -1342,8 +1412,8 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
   ));
 }
 
-function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo): Promise<NotionPage[]> {
-  return memoFetch(memo.rows, `${token}:rows:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, memo.maxChildren));
+function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string): Promise<NotionPage[]> {
+  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, memo.maxChildren));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -1412,7 +1482,6 @@ async function fetchAllRows(token: string, dataSourceId: string, kind: "database
 }
 
 async function apiFetch<T>(token: string, url: string, options: ApiFetchOptions = {}, attempt = 0): Promise<T> {
-  await waitForNotionTurn(options);
   let response: Response;
   try {
     response = await fetch(url, { headers: { "x-notion-token": token }, signal: options.signal });
@@ -1523,18 +1592,20 @@ async function buildExportTitleMap(token: string, items: ExportItem[], nodes: Tr
 
   const missingIds = Array.from(titleById.entries()).filter(([, title]) => !title).map(([id]) => id);
   let resolved = 0;
-  for (const id of missingIds) {
-    try {
-      options.onStatus?.(`Resolving linked titles ${resolved + 1}/${missingIds.length}...`);
-      const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, options);
-      titleById.set(id, object.title);
-      cache.set(id, object.title);
-    } catch (err) {
-      if (isAbortError(err)) throw err;
-      titleById.set(id, "");
-    }
-    resolved += 1;
-  }
+  await Promise.all(
+    missingIds.map(async (id) => {
+      try {
+        const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, options);
+        titleById.set(id, object.title);
+        cache.set(id, object.title);
+      } catch (err) {
+        if (isAbortError(err)) throw err;
+        titleById.set(id, "");
+      }
+      resolved += 1;
+      options.onStatus?.(`Resolving linked titles ${resolved}/${missingIds.length}...`);
+    })
+  );
   return titleById;
 }
 
