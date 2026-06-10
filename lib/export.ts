@@ -20,6 +20,7 @@ export type PageExportItem = {
   title: string; 
   page?: NotionPage; 
   blocks?: NotionBlock[]; 
+  comments?: any[];
   includeProperties?: boolean;
   depth?: number;
 };
@@ -224,8 +225,10 @@ function pageToXml(item: PageExportItem, options: ExportOptions): string | null 
   const id = item.page?.id || item.id;
   const blocks = item.blocks?.map((b) => blockToXml(b, options)).filter(Boolean) ?? [];
   const hasBlocks = blocks.length > 0;
+  const comments = item.comments || [];
+  const hasComments = comments.length > 0;
 
-  if (item.includeProperties === false && !hasBlocks) {
+  if (item.includeProperties === false && !hasBlocks && !hasComments) {
     return null;
   }
 
@@ -241,6 +244,17 @@ function pageToXml(item: PageExportItem, options: ExportOptions): string | null 
       lines.push(`    <property name="${escapeXmlAttribute(name)}">${escapeXmlText(propertyValue(prop, options))}</property>`);
     }
     lines.push("  </properties>");
+  }
+
+  if (hasComments) {
+    lines.push("  <comments>");
+    for (const comment of comments) {
+      const author = comment.created_by?.name ?? comment.created_by?.id ?? "Unknown";
+      const time = comment.created_time ?? "";
+      const text = richTextToPlainText(comment.rich_text);
+      lines.push(`    <comment author="${escapeXmlAttribute(author)}" time="${escapeXmlAttribute(time)}">${escapeXmlText(text)}</comment>`);
+    }
+    lines.push("  </comments>");
   }
 
   if (hasBlocks) {

@@ -10,12 +10,14 @@ export async function GET(request: Request, { params }: Params) {
     const depthParam = searchParams.get("depth");
     const maxDepth = depthParam === "Surface" ? 0 : depthParam === "All" || !depthParam ? 20 : Number(depthParam);
 
+    let comments: any[] = [];
     try {
-      await notionFetch(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-content/${params.id}`, "comments") });
+      const res = await notionFetch<any>(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-content/${params.id}`, "comments") });
+      comments = res.results || [];
     } catch {}
 
     const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`);
-    return Response.json({ results: blocks });
+    return Response.json({ results: blocks, comments });
   } catch (error) {
     return notionErrorResponse(error);
   }

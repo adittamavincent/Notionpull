@@ -160,7 +160,7 @@ export default function Page() {
   // Caching
   const treeCache = useRef<Map<string, TreeNodeData>>(new Map());
   const pageChildrenCache = useRef<Map<string, Promise<PageChildrenResponse>>>(new Map());
-  const contentCache = useRef<Map<string, Promise<{ results: NotionBlock[] }>>>(new Map());
+  const contentCache = useRef<Map<string, Promise<{ results: NotionBlock[]; comments?: any[] }>>>(new Map());
   const databaseCache = useRef<Map<string, Promise<DatabaseResponse>>>(new Map());
   const rowsCache = useRef<Map<string, Promise<NotionPage[]>>>(new Map());
   const titleCache = useRef<Map<string, string>>(new Map());
@@ -708,12 +708,14 @@ export default function Page() {
           // No hard jump to 50%, let the smooth UI logic handle the perceived progress
 
           let blocks: NotionBlock[] = [];
+          let comments: any[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
               const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () =>
-                apiFetch<{ results: NotionBlock[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`, { signal: controller.signal, onStatus: setExportStatus })
+                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`, { signal: controller.signal, onStatus: setExportStatus })
               );
               blocks = body.results;
+              comments = body.comments || [];
 
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
@@ -773,7 +775,7 @@ export default function Page() {
           if (rowAlreadyInSelectedTable && !blocks.length && !hasSelectedChildren) {
             // Skip — pure leaf row, rendered only in the parent table
           } else {
-            items.push({ id: node.id, kind: node.kind, title: node.title, page: node.page, blocks, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
+            items.push({ id: node.id, kind: node.kind, title: node.title, page: node.page, blocks, comments, includeProperties: !rowAlreadyInSelectedTable, depth: node.depth });
           }
         }
 
