@@ -5,6 +5,11 @@ type Params = { params: { id: string } };
 export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
+
+    try {
+      await notionFetch(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, "comments") });
+    } catch { }
+
     const blocks: any[] = [];
     let start_cursor: string | undefined;
     do {
@@ -22,6 +27,14 @@ export async function GET(request: Request, { params }: Params) {
     const resolvedDbs = new Map<string, { title: string; dataSourceName?: string; isLinkedDatabase?: boolean }>();
 
     const promises: Promise<any>[] = [];
+
+    blocks.forEach((block) => {
+      promises.push((async () => {
+        try {
+          await notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `block-comments/${block.id}`) });
+        } catch { }
+      })());
+    });
 
     if (linkToPageBlocks.length > 0) {
       promises.push(...linkToPageBlocks.map(async (block) => {
@@ -72,7 +85,7 @@ export async function GET(request: Request, { params }: Params) {
             dataSourceName: actualInfo.dataSourceName,
             isLinkedDatabase: !!actualInfo.dataSourceId && actualInfo.dataSourceId !== block.id
           });
-        } catch {}
+        } catch { }
       }));
     }
 
@@ -138,7 +151,7 @@ export async function GET(request: Request, { params }: Params) {
           if (node.hasChildren) return true;
           // Keep special visual blocks
           if (["divider", "image", "video", "file", "pdf", "equation", "table", "table_row"].includes(node.kind)) return true;
-          
+
           return false;
         })
     });

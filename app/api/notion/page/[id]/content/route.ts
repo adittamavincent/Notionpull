@@ -10,6 +10,10 @@ export async function GET(request: Request, { params }: Params) {
     const depthParam = searchParams.get("depth");
     const maxDepth = depthParam === "Surface" ? 0 : depthParam === "All" || !depthParam ? 20 : Number(depthParam);
 
+    try {
+      await notionFetch(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-content/${params.id}`, "comments") });
+    } catch {}
+
     const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`);
     return Response.json({ results: blocks });
   } catch (error) {
@@ -33,6 +37,16 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
     const resolvedDbs = new Map<string, { title: string }>();
 
     const promises: Promise<any>[] = [];
+
+    body.results.forEach((block: any) => {
+      promises.push(
+        (async () => {
+          try {
+            await notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(traceRoot, `block-comments/${block.id}`) });
+          } catch {}
+        })()
+      );
+    });
 
     if (linkToPageBlocks.length > 0) {
       promises.push(
