@@ -38,16 +38,6 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
 
     const promises: Promise<any>[] = [];
 
-    body.results.forEach((block: any) => {
-      promises.push(
-        (async () => {
-          try {
-            await notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(traceRoot, `block-comments/${block.id}`) });
-          } catch {}
-        })()
-      );
-    });
-
     if (linkToPageBlocks.length > 0) {
       promises.push(
         ...linkToPageBlocks.map(async (block: any) => {

@@ -25,16 +25,7 @@ export async function GET(request: Request, { params }: Params) {
     const childDbBlocks = blocks.filter((block) => block.type === "child_database");
     const resolvedLinks = new Map<string, { targetId: string; targetType: "database" | "page"; title: string; dataSourceName?: string; isLinkedDatabase?: boolean }>();
     const resolvedDbs = new Map<string, { title: string; dataSourceName?: string; isLinkedDatabase?: boolean }>();
-
     const promises: Promise<any>[] = [];
-
-    blocks.forEach((block) => {
-      promises.push((async () => {
-        try {
-          await notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `block-comments/${block.id}`) });
-        } catch { }
-      })());
-    });
 
     if (linkToPageBlocks.length > 0) {
       promises.push(...linkToPageBlocks.map(async (block) => {
