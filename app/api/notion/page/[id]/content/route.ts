@@ -30,6 +30,11 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
     if (start_cursor) qs.set("start_cursor", start_cursor);
     const body: any = await notionFetch(token, `/blocks/${blockId}/children?${qs.toString()}`, {}, { tracePath: traceChild(traceRoot, "children") });
 
+    // Background fetch comments for child blocks
+    body.results.forEach((block: any) => {
+      notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(traceRoot, `block-comments/${block.id}`) }).catch(() => {});
+    });
+
     // Resolve link_to_page blocks and child_database blocks in parallel
     const linkToPageBlocks = body.results.filter((block: any) => block.type === "link_to_page");
     const childDbBlocks = body.results.filter((block: any) => block.type === "child_database");

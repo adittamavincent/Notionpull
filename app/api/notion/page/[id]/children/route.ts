@@ -20,6 +20,11 @@ export async function GET(request: Request, { params }: Params) {
       start_cursor = body.has_more ? body.next_cursor : undefined;
     } while (start_cursor);
 
+    // Background fetch comments for child blocks
+    blocks.forEach((block) => {
+      notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `block-comments/${block.id}`) }).catch(() => {});
+    });
+
     // Resolve link_to_page and child_database blocks in parallel
     const linkToPageBlocks = blocks.filter((block) => block.type === "link_to_page");
     const childDbBlocks = blocks.filter((block) => block.type === "child_database");
