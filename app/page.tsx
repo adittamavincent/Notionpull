@@ -39,16 +39,19 @@ function normalizeUrl(url: string): string {
 
 function highlightNotionUrl(url: string) {
   if (!url) return "";
-  const escaped = url
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  
+  const escapeHtml = (str: string) => {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  };
 
   const regex = /^(https?:\/\/)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})?(\/[a-zA-Z0-9-._~:\/]*?([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}))?(\?[^#]*)?(#.*)?$/i;
-  const match = escaped.match(regex);
+  const match = url.match(regex);
 
   if (!match) {
-    return `<span class="text-zinc-600">${escaped}</span>`;
+    return `<span class="text-zinc-600">${escapeHtml(url)}</span>`;
   }
 
   const [_, protocol = "", domain = "", pathAndId = "", id = "", query = "", hash = ""] = match;
@@ -62,21 +65,21 @@ function highlightNotionUrl(url: string) {
   }
 
   let html = "";
-  if (protocol) html += `<span class="text-zinc-400/80">${protocol}</span>`;
-  if (domain) html += `<span class="text-emerald-600 font-semibold">${domain}</span>`;
-  if (path) html += `<span class="text-zinc-500">${path}</span>`;
-  if (id) html += `<span class="text-violet-600 font-bold">${id}</span>`;
+  if (protocol) html += `<span class="text-zinc-400/80">${escapeHtml(protocol)}</span>`;
+  if (domain) html += `<span class="text-emerald-600">${escapeHtml(domain)}</span>`;
+  if (path) html += `<span class="text-zinc-500">${escapeHtml(path)}</span>`;
+  if (id) html += `<span class="text-violet-600">${escapeHtml(id)}</span>`;
   if (query) {
     const highlightedQuery = query.replace(/([\?&])([^=&\s]+)(=[^&\s]*)?/g, (m, sep, key, val) => {
-      let segment = `<span class="text-zinc-400">${sep}</span><span class="text-amber-600 font-medium">${key}</span>`;
+      let segment = `<span class="text-zinc-400">${escapeHtml(sep)}</span><span class="text-amber-600">${escapeHtml(key)}</span>`;
       if (val) {
-        segment += `<span class="text-zinc-400">=</span><span class="text-cyan-600">${val.substring(1)}</span>`;
+        segment += `<span class="text-zinc-400">=</span><span class="text-cyan-600">${escapeHtml(val.substring(1))}</span>`;
       }
       return segment;
     });
     html += highlightedQuery;
   }
-  if (hash) html += `<span class="text-zinc-400">${hash}</span>`;
+  if (hash) html += `<span class="text-zinc-400">${escapeHtml(hash)}</span>`;
 
   return html;
 }
@@ -1113,7 +1116,6 @@ export default function Page() {
                       Fetched {relativeTime}
                     </span>
                   )}
-                  {error && <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-100">{error}</span>}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-4 ml-auto min-w-0 flex-auto">
@@ -1200,6 +1202,11 @@ export default function Page() {
                   )}
                 </div>
               </div>
+              {error && (
+                <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3.5 text-xs font-medium text-red-700 shadow-sm">
+                  {error}
+                </div>
+              )}
               <div className="flex flex-col lg:flex-row gap-6 items-start justify-between">
                 {/* Left Side: Inputs */}
                 <div className="flex-1 w-full space-y-3">
@@ -1212,7 +1219,7 @@ export default function Page() {
                         <div className="relative flex-1 group">
                           {singleUrl && (
                             <div
-                              className="url-highlight-overlay absolute inset-0 pl-3.5 py-2 text-sm font-mono whitespace-nowrap overflow-hidden pointer-events-none select-none flex items-center border border-transparent bg-transparent"
+                              className="url-highlight-overlay absolute inset-0 pl-3.5 pr-3 text-sm font-mono whitespace-nowrap overflow-hidden pointer-events-none select-none border border-transparent bg-transparent leading-[1.25rem] py-[calc(0.5rem+1px)]"
                               style={{
                                 paddingRight: matchedDet && isDuplicate ? "18rem" : matchedDet ? "14rem" : isDuplicate ? "6rem" : "0.75rem"
                               }}
