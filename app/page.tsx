@@ -93,6 +93,8 @@ export default function Page() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [newPresetName, setNewPresetName] = useState("");
   const [showSavePreset, setShowSavePreset] = useState(false);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [detectedList, setDetectedList] = useState<DetectedObject[]>([]);
   const detected = detectedList[0] ?? null;
@@ -289,6 +291,20 @@ export default function Page() {
       }
     } catch { }
   }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setExportDropdownOpen(false);
+      }
+    };
+    if (exportDropdownOpen) {
+      document.addEventListener("mousedown", handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [exportDropdownOpen]);
 
   const savePreset = (name: string) => {
     if (!name.trim()) return;
@@ -1406,7 +1422,7 @@ export default function Page() {
               </div>
 
               {/* Presets List */}
-              <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-100 pb-3">
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-100 pb-3 relative">
                 <Bookmark className="h-4 w-4 text-zinc-400" />
                 <span className="text-xs text-zinc-500 font-semibold mr-1">Presets:</span>
                 
@@ -1427,14 +1443,6 @@ export default function Page() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => exportSinglePreset(preset)}
-                        className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-700 border-r border-zinc-100"
-                        title="Export Preset"
-                      >
-                        <Download className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => removePreset(preset.id)}
                         className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-red-50 hover:text-red-500"
                         title="Delete Preset"
@@ -1447,7 +1455,7 @@ export default function Page() {
                   <span className="text-xs text-zinc-400 italic">No presets saved yet</span>
                 )}
 
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="ml-auto flex items-center gap-1.5 relative" ref={dropdownRef}>
                   <button
                     type="button"
                     onClick={() => document.getElementById("preset-import-input")?.click()}
@@ -1460,14 +1468,47 @@ export default function Page() {
                   {presets.length > 0 && (
                     <button
                       type="button"
-                      onClick={exportPresets}
+                      onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
                       className="inline-flex items-center gap-1 rounded bg-zinc-100 border border-zinc-200 px-2 py-0.5 text-[10px] font-bold text-zinc-600 transition hover:bg-zinc-200 active:scale-95 cursor-pointer"
-                      title="Export presets to JSON"
+                      title="Export presets"
                     >
                       <Download className="h-3 w-3" />
                       Export
                     </button>
                   )}
+
+                  {exportDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1.5 w-48 rounded-md border border-zinc-200 bg-white py-1 shadow-lg z-50">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          exportPresets();
+                          setExportDropdownOpen(false);
+                        }}
+                        className="flex w-full items-center px-3 py-1.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Export All Presets
+                      </button>
+                      <div className="h-px bg-zinc-100 my-1" />
+                      <div className="max-h-40 overflow-y-auto">
+                        {presets.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => {
+                              exportSinglePreset(preset);
+                              setExportDropdownOpen(false);
+                            }}
+                            className="flex w-full items-center px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50 truncate"
+                            title={`Export ${preset.name}`}
+                          >
+                            Export &quot;{preset.name}&quot;
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <input
                     id="preset-import-input"
                     type="file"
