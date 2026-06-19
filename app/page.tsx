@@ -11,7 +11,7 @@ import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
-import { History, RefreshCw, LogOut, X, FileText, Database, Table2 } from "lucide-react";
+import { History, RefreshCw, LogOut, X, FileText, Database, Table2, Bookmark } from "lucide-react";
 import Image from "next/image";
 
 type DepthOption = "Surface" | "1" | "2" | "3" | "4" | "5" | "All";
@@ -22,6 +22,12 @@ export interface HistoryItem {
   url: string;
   title: string;
   type: string;
+}
+
+export interface Preset {
+  id: string;
+  name: string;
+  urls: string[];
 }
 
 function normalizeUrl(url: string): string {
@@ -40,6 +46,9 @@ export default function Page() {
   const [urls, setUrls] = useState<string[]>([""]);
   const [activeInputIndex, setActiveInputIndex] = useState<number>(0);
   const [urlHistory, setUrlHistory] = useState<HistoryItem[]>([]);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [showSavePreset, setShowSavePreset] = useState(false);
 
   const [detectedList, setDetectedList] = useState<DetectedObject[]>([]);
   const detected = detectedList[0] ?? null;
@@ -213,6 +222,50 @@ export default function Page() {
     } catch { }
   };
 
+  // Load Presets from LocalStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("notionpull_presets");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setPresets(parsed);
+        }
+      }
+    } catch { }
+  }, []);
+
+  const savePreset = (name: string) => {
+    if (!name.trim()) return;
+    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
+    if (!activeUrls.length) return;
+    const newPreset: Preset = {
+      id: Date.now().toString(),
+      name: name.trim(),
+      urls: activeUrls
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    try {
+      localStorage.setItem("notionpull_presets", JSON.stringify(updated));
+    } catch { }
+    setNewPresetName("");
+    setShowSavePreset(false);
+  };
+
+  const removePreset = (id: string) => {
+    const updated = presets.filter(p => p.id !== id);
+    setPresets(updated);
+    try {
+      localStorage.setItem("notionpull_presets", JSON.stringify(updated));
+    } catch { }
+  };
+
+  const applyPreset = (preset: Preset) => {
+    setUrls(preset.urls);
+    triggerFetch(preset.urls);
+  };
+
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
 
   const displayedHistory = useMemo(() => {
@@ -285,11 +338,10 @@ export default function Page() {
     setActiveLabel(nextActive);
   }
 
-  async function submitUrl(event: FormEvent) {
-    event.preventDefault();
+  async function triggerFetch(targetUrls: string[]) {
     if (!activeToken) return;
 
-    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
+    const activeUrls = targetUrls.map(u => u.trim()).filter(Boolean);
     if (!activeUrls.length) return;
 
     const allIds = activeUrls.flatMap(url => extractNotionIds(url));
@@ -365,6 +417,11 @@ export default function Page() {
     } finally {
       if (treeAbortRef.current === controller) treeAbortRef.current = null;
     }
+  }
+
+  async function submitUrl(event: FormEvent) {
+    event.preventDefault();
+    await triggerFetch(urls);
   }
 
   async function refetchUrl(index: number) {
@@ -1079,16 +1136,66 @@ export default function Page() {
                     );
                   })}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUrls(prev => [...prev, ""]);
-                      setActiveInputIndex(urls.length);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95"
-                  >
-                    + Add another URL
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUrls(prev => [...prev, ""]);
+                        setActiveInputIndex(urls.length);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95"
+                    >
+                      + Add another URL
+                    </button>
+
+                    {urls.some(u => u.trim()) && !showSavePreset && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSavePreset(true)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95"
+                      >
+                        <Bookmark className="h-3.5 w-3.5 text-zinc-400" />
+                        Save as Preset
+                      </button>
+                    )}
+
+                    {showSavePreset && (
+                      <div className="flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 shadow-sm">
+                        <input
+                          type="text"
+                          placeholder="Preset name..."
+                          value={newPresetName}
+                          onChange={(e) => setNewPresetName(e.target.value)}
+                          className="text-xs outline-none border-none bg-transparent w-32 font-medium text-zinc-800"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") savePreset(newPresetName);
+                            if (e.key === "Escape") {
+                              setShowSavePreset(false);
+                              setNewPresetName("");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => savePreset(newPresetName)}
+                          className="text-xs font-bold text-zinc-900 hover:text-zinc-700 px-1"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSavePreset(false);
+                            setNewPresetName("");
+                          }}
+                          className="text-xs font-bold text-zinc-400 hover:text-zinc-600 px-1"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Right Side: Action Buttons */}
@@ -1142,6 +1249,38 @@ export default function Page() {
                   )}
                 </div>
               </div>
+
+              {/* Presets List */}
+              {presets.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-100 pb-3">
+                  <Bookmark className="h-4 w-4 text-zinc-400" />
+                  <span className="text-xs text-zinc-500 font-semibold">Presets:</span>
+                  {presets.map((preset) => (
+                    <div key={preset.id} className="group relative flex h-7 items-stretch rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden transition-colors hover:border-zinc-300">
+                      <button
+                        type="button"
+                        onClick={() => applyPreset(preset)}
+                        className="inline-flex flex-1 items-center gap-1.5 bg-white px-2.5 text-xs text-zinc-600 transition hover:bg-zinc-50 border-r border-zinc-100"
+                        title={preset.urls.join(", ")}
+                      >
+                        <span className="flex items-center justify-center text-zinc-400">
+                          <Bookmark className="h-3.5 w-3.5 text-zinc-400" />
+                        </span>
+                        <span className="max-w-[150px] truncate font-semibold">{preset.name}</span>
+                        <span className="text-[10px] text-zinc-400">({preset.urls.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removePreset(preset.id)}
+                        className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-red-50 hover:text-red-500"
+                        title="Delete Preset"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {displayedHistory.length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
