@@ -1064,7 +1064,7 @@ export default function Page() {
 
   return (
     <main className="min-h-screen pb-24 bg-zinc-50">
-      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <div className="cursor-pointer select-none flex items-center gap-2.5" onClick={clearWork} title="Start over">
             <Image src="/favicon.png" alt="Notionpull logo" width={28} height={28} className="rounded-md" />
