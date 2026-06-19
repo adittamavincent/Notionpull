@@ -417,6 +417,18 @@ export default function Page() {
 
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
 
+  const isCurrentInputSavedAsPreset = useMemo(() => {
+    const currentActiveUrls = urls.map(u => normalizeUrl(u)).filter(Boolean);
+    if (!currentActiveUrls.length) return false;
+    const sortedCurrent = [...currentActiveUrls].sort();
+    return presets.some(preset => {
+      const presetNormalized = preset.urls.map(u => normalizeUrl(u)).filter(Boolean);
+      if (presetNormalized.length !== currentActiveUrls.length) return false;
+      const sortedPreset = [...presetNormalized].sort();
+      return sortedCurrent.every((u, i) => u === sortedPreset[i]);
+    });
+  }, [urls, presets]);
+
   const displayedHistory = useMemo(() => {
     const inputUrls = new Set(urls.map((u) => normalizeUrl(u)));
     return urlHistory.filter((item) => !inputUrls.has(normalizeUrl(item.url)));
@@ -1330,7 +1342,9 @@ export default function Page() {
                       <button
                         type="button"
                         onClick={() => setShowSavePreset(true)}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95"
+                        disabled={isCurrentInputSavedAsPreset}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 active:scale-95 disabled:bg-zinc-50 disabled:text-zinc-400 disabled:border-zinc-200 disabled:transform-none disabled:shadow-none disabled:cursor-not-allowed"
+                        title={isCurrentInputSavedAsPreset ? "Preset already saved" : "Save current URLs as preset"}
                       >
                         <Bookmark className="h-3.5 w-3.5 text-zinc-400" />
                         Save as Preset
