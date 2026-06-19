@@ -5,10 +5,14 @@ type Params = { params: { id: string } };
 export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
+    const { searchParams } = new URL(request.url);
+    const fetchComments = searchParams.get("comments") === "true";
 
-    try {
-      await notionFetch(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, "comments") });
-    } catch { }
+    if (fetchComments) {
+      try {
+        await notionFetch(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, "comments") });
+      } catch { }
+    }
 
     const blocks: any[] = [];
     let start_cursor: string | undefined;
@@ -20,10 +24,12 @@ export async function GET(request: Request, { params }: Params) {
       start_cursor = body.has_more ? body.next_cursor : undefined;
     } while (start_cursor);
 
-    // Background fetch comments for child blocks
-    blocks.forEach((block) => {
-      notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `block-comments/${block.id}`) }).catch(() => {});
-    });
+    if (fetchComments) {
+      // Background fetch comments for child blocks
+      blocks.forEach((block) => {
+        notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `block-comments/${block.id}`) }).catch(() => {});
+      });
+    }
 
     // Resolve link_to_page and child_database blocks in parallel
     const linkToPageBlocks = blocks.filter((block) => block.type === "link_to_page");

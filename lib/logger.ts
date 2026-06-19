@@ -147,6 +147,15 @@ export function getLogs(): LogEntry[] {
           }
         }
       }
+
+      // 6. Comments
+      const commentsMatch = /\/comments\?block_id=([a-fA-F0-9-]{32,36})/.exec(path);
+      if (commentsMatch) {
+        const resolved = getResolvedTitle(commentsMatch[1]);
+        if (resolved) {
+          nameTag = `${resolved} (comments)`;
+        }
+      }
     }
     return { ...log, nameTag };
   });

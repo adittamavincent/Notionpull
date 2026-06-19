@@ -10,20 +10,24 @@ export async function GET(request: Request, { params }: Params) {
     const depthParam = searchParams.get("depth");
     const maxDepth = depthParam === "Surface" ? 0 : depthParam === "All" || !depthParam ? 20 : Number(depthParam);
 
-    let comments: any[] = [];
-    try {
-      const res = await notionFetch<any>(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-content/${params.id}`, "comments") });
-      comments = res.results || [];
-    } catch {}
+    const fetchComments = searchParams.get("comments") === "true";
 
-    const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`);
+    let comments: any[] = [];
+    if (fetchComments) {
+      try {
+        const res = await notionFetch<any>(token, `/comments?block_id=${params.id}`, {}, { tracePath: traceChild(`page-content/${params.id}`, "comments") });
+        comments = res.results || [];
+      } catch {}
+    }
+
+    const blocks = await getChildren(token, params.id, 0, maxDepth, `page-content/${params.id}`, fetchComments);
     return Response.json({ results: blocks, comments });
   } catch (error) {
     return notionErrorResponse(error);
   }
 }
 
-async function getChildren(token: string, blockId: string, depth: number, maxDepth: number, traceRoot: string): Promise<NotionBlock[]> {
+async function getChildren(token: string, blockId: string, depth: number, maxDepth: number, traceRoot: string, fetchComments: boolean): Promise<NotionBlock[]> {
   if (depth >= maxDepth) return [];
   const blocks: NotionBlock[] = [];
   let start_cursor: string | undefined;
@@ -32,10 +36,12 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
     if (start_cursor) qs.set("start_cursor", start_cursor);
     const body: any = await notionFetch(token, `/blocks/${blockId}/children?${qs.toString()}`, {}, { tracePath: traceChild(traceRoot, "children") });
 
-    // Background fetch comments for child blocks
-    body.results.forEach((block: any) => {
-      notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(traceRoot, `block-comments/${block.id}`) }).catch(() => {});
-    });
+    if (fetchComments) {
+      // Background fetch comments for child blocks
+      body.results.forEach((block: any) => {
+        notionFetch(token, `/comments?block_id=${block.id}`, {}, { tracePath: traceChild(traceRoot, `block-comments/${block.id}`) }).catch(() => {});
+      });
+    }
 
     // Resolve link_to_page blocks and child_database blocks in parallel
     const linkToPageBlocks = body.results.filter((block: any) => block.type === "link_to_page");
@@ -151,7 +157,7 @@ async function getChildren(token: string, blockId: string, depth: number, maxDep
       }
 
       if (block.has_children && (depth + 1 < maxDepth)) {
-        block.children = await getChildren(token, block.id, depth + 1, maxDepth, traceChild(traceRoot, `child/${block.id}`));
+        block.children = await getChildren(token, block.id, depth + 1, maxDepth, traceChild(traceRoot, `child/${block.id}`), fetchComments);
       }
       
       // Filter out truly empty blocks

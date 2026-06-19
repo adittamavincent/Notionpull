@@ -111,6 +111,7 @@ export default function Page() {
 
   const [showRelationIds, setShowRelationIds] = useState(false);
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
+  const [fetchComments, setFetchComments] = useState(false);
   const [maxChildren, setMaxChildren] = useState<number>(5);
   const [resetLog, setResetLog] = useState(true);
 
@@ -132,6 +133,10 @@ export default function Page() {
       const savedResetLog = localStorage.getItem("notionpull_reset_log");
       if (savedResetLog !== null) {
         setResetLog(savedResetLog === "true");
+      }
+      const savedComments = localStorage.getItem("notionpull_fetch_comments");
+      if (savedComments !== null) {
+        setFetchComments(savedComments === "true");
       }
     } catch { }
   }, []);
@@ -158,6 +163,13 @@ export default function Page() {
     setFetchLinkedChildren(val);
     try {
       localStorage.setItem("notionpull_fetch_linked_children", String(val));
+    } catch { }
+  };
+
+  const handleFetchCommentsChange = (val: boolean) => {
+    setFetchComments(val);
+    try {
+      localStorage.setItem("notionpull_fetch_comments", String(val));
     } catch { }
   };
 
@@ -664,6 +676,7 @@ export default function Page() {
         rows: rowsCache.current,
         showIdForRelationRollup: showRelationIds,
         fetchLinkedChildren,
+        fetchComments,
         maxChildren,
         signal: controller.signal
       });
@@ -765,6 +778,7 @@ export default function Page() {
           rows: rowsCache.current,
           showIdForRelationRollup: showRelationIds,
           fetchLinkedChildren,
+          fetchComments,
           maxChildren,
           signal: controller!.signal
         });
@@ -929,8 +943,8 @@ export default function Page() {
           let comments: any[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
-              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}`, () =>
-                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}`, { signal: controller.signal, onStatus: setExportStatus })
+              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}:${fetchComments}`, () =>
+                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}&comments=${fetchComments}`, { signal: controller.signal, onStatus: setExportStatus })
               );
               blocks = body.results;
               comments = body.comments || [];
@@ -1183,6 +1197,23 @@ export default function Page() {
                         <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchLinkedChildren ? "translate-x-4" : "translate-x-0"}`} />
                       </div>
                       <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Linked DB Children</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={fetchComments}
+                          onChange={(e) => handleFetchCommentsChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchComments ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchComments ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Fetch Comments</span>
                     </label>
                   </div>
 
@@ -1678,6 +1709,7 @@ type BuildMemo = {
   rows: Map<string, Promise<NotionPage[]>>;
   showIdForRelationRollup?: boolean;
   fetchLinkedChildren?: boolean;
+  fetchComments?: boolean;
   maxChildren?: number;
   signal?: AbortSignal;
 };
@@ -1799,8 +1831,9 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
 }
 
 function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promise<PageChildrenResponse> {
-  return memoFetch(memo.pageChildren, `${token}:page:${pageId}`, () => (
-    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children`, { signal: memo.signal })
+  const commentsQuery = memo.fetchComments ? `?comments=true` : "";
+  return memoFetch(memo.pageChildren, `${token}:page:${pageId}:${memo.fetchComments ?? false}`, () => (
+    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children${commentsQuery}`, { signal: memo.signal })
   ));
 }
 
