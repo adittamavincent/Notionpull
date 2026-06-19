@@ -338,6 +338,24 @@ export default function Page() {
     }
   };
 
+  const exportSinglePreset = (preset: Preset) => {
+    try {
+      const dataStr = JSON.stringify([preset], null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const safeName = preset.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      link.download = `${safeName}_preset.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export preset:", err);
+    }
+  };
+
   const importPresets = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1406,6 +1424,14 @@ export default function Page() {
                         </span>
                         <span className="max-w-[150px] truncate font-semibold">{preset.name}</span>
                         <span className="text-[10px] text-zinc-400">({preset.urls.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportSinglePreset(preset)}
+                        className="inline-flex w-7 items-center justify-center bg-white text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-700 border-r border-zinc-100"
+                        title="Export Preset"
+                      >
+                        <Download className="h-3 w-3" />
                       </button>
                       <button
                         type="button"
