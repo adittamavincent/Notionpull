@@ -91,13 +91,16 @@ export function TokenManager({ open, tokens, activeLabel, onClose, onChange }: P
         <div className="flex-1 overflow-auto px-5 py-4">
           <div className="space-y-2">
             {tokens.map((entry) => (
-              <div
+               <div
                 key={entry.label}
-                className={`rounded-md border p-3 ${entry.label === activeLabel ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"}`}
+                className={`rounded-md border p-3 cursor-pointer transition ${
+                  entry.label === activeLabel ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 hover:bg-zinc-50/50"
+                }`}
+                onClick={() => setActive(entry.label)}
               >
                 <div className="flex items-start gap-3">
                   <input
-                    className="mt-1"
+                    className="mt-1 pointer-events-none"
                     type="radio"
                     checked={entry.label === activeLabel}
                     onChange={() => setActive(entry.label)}
@@ -108,7 +111,13 @@ export function TokenManager({ open, tokens, activeLabel, onClose, onChange }: P
                     <div className="truncate text-xs text-zinc-500">{entry.workspaceName ?? "Unverified workspace"}</div>
                     <div className="mt-1 text-xs text-zinc-400">{maskToken(entry.token)}</div>
                   </div>
-                  <button className="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50" onClick={() => remove(entry.label)}>
+                  <button
+                    className="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 relative z-10"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(entry.label);
+                    }}
+                  >
                     Delete
                   </button>
                 </div>
