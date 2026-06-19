@@ -37,6 +37,50 @@ function normalizeUrl(url: string): string {
   return cleaned;
 }
 
+function highlightNotionUrl(url: string) {
+  if (!url) return "";
+  const escaped = url
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const regex = /^(https?:\/\/)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})?(\/[a-zA-Z0-9-._~:\/]*?([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}))?(\?[^#]*)?(#.*)?$/i;
+  const match = escaped.match(regex);
+
+  if (!match) {
+    return `<span class="text-zinc-600">${escaped}</span>`;
+  }
+
+  const [_, protocol = "", domain = "", pathAndId = "", id = "", query = "", hash = ""] = match;
+
+  let path = "";
+  if (pathAndId && id) {
+    const idx = pathAndId.lastIndexOf(id);
+    if (idx !== -1) {
+      path = pathAndId.substring(0, idx);
+    }
+  }
+
+  let html = "";
+  if (protocol) html += `<span class="text-zinc-400/80">${protocol}</span>`;
+  if (domain) html += `<span class="text-emerald-600 font-semibold">${domain}</span>`;
+  if (path) html += `<span class="text-zinc-500">${path}</span>`;
+  if (id) html += `<span class="text-violet-600 font-bold">${id}</span>`;
+  if (query) {
+    const highlightedQuery = query.replace(/([\?&])([^=&\s]+)(=[^&\s]*)?/g, (m, sep, key, val) => {
+      let segment = `<span class="text-zinc-400">${sep}</span><span class="text-amber-600 font-medium">${key}</span>`;
+      if (val) {
+        segment += `<span class="text-zinc-400">=</span><span class="text-cyan-600">${val.substring(1)}</span>`;
+      }
+      return segment;
+    });
+    html += highlightedQuery;
+  }
+  if (hash) html += `<span class="text-zinc-400">${hash}</span>`;
+
+  return html;
+}
+
 export default function Page() {
   const [tokens, setTokens] = useState<NotionTokenEntry[]>([]);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
@@ -86,6 +130,17 @@ export default function Page() {
       }
     } catch { }
   }, []);
+
+  const handleUrlScroll = (e: React.UIEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const container = input.parentElement;
+    if (container) {
+      const overlay = container.querySelector(".url-highlight-overlay") as HTMLDivElement | null;
+      if (overlay) {
+        overlay.scrollLeft = input.scrollLeft;
+      }
+    }
+  };
 
   const handleShowRelationIdsChange = (val: boolean) => {
     setShowRelationIds(val);
@@ -1121,8 +1176,19 @@ export default function Page() {
                     return (
                       <div key={index} className="flex gap-2 items-center">
                         <div className="relative flex-1 group">
+                          {singleUrl && (
+                            <div
+                              className="url-highlight-overlay absolute inset-0 pl-3.5 py-2 text-sm font-mono whitespace-nowrap overflow-hidden pointer-events-none select-none flex items-center border border-transparent bg-transparent"
+                              style={{
+                                paddingRight: matchedDet && isDuplicate ? "18rem" : matchedDet ? "14rem" : isDuplicate ? "6rem" : "0.75rem"
+                              }}
+                              dangerouslySetInnerHTML={{ __html: highlightNotionUrl(singleUrl) }}
+                            />
+                          )}
                           <input
-                            className={`w-full rounded-md border pl-3.5 py-2 text-sm font-mono outline-none transition duration-150 ${
+                            className={`w-full rounded-md border pl-3.5 py-2 text-sm font-mono outline-none transition duration-150 caret-zinc-950 bg-transparent relative z-10 ${
+                              singleUrl ? "text-transparent" : "text-zinc-900"
+                            } ${
                               matchedDet && isDuplicate ? "pr-72" : matchedDet ? "pr-56" : isDuplicate ? "pr-24" : "pr-3"
                             } ${
                               isDuplicate
@@ -1139,6 +1205,7 @@ export default function Page() {
                                 return next;
                               });
                             }}
+                            onScroll={handleUrlScroll}
                             onFocus={() => setActiveInputIndex(index)}
                             placeholder="Paste a Notion page or database URL..."
                           />
