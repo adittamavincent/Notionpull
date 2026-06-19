@@ -1391,7 +1391,7 @@ export default function Page() {
                 </div>
 
                 {/* Right Side: Action Buttons */}
-                <div className="shrink-0 flex flex-col gap-3 items-stretch w-full lg:w-auto">
+                <div className="shrink-0 flex flex-col gap-3 items-stretch w-full lg:w-auto lg:sticky lg:top-24">
                   {loadingTree && (
                     <button
                       type="button"
