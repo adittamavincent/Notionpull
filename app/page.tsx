@@ -11,7 +11,7 @@ import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
-import { History, RefreshCw, LogOut, X, FileText, Database, Table2, Bookmark } from "lucide-react";
+import { History, RefreshCw, LogOut, X, FileText, Database, Table2, Bookmark, Download, Upload } from "lucide-react";
 import Image from "next/image";
 
 type DepthOption = "Surface" | "1" | "2" | "3" | "4" | "5" | "All";
@@ -264,6 +264,63 @@ export default function Page() {
   const applyPreset = (preset: Preset) => {
     setUrls(preset.urls);
     triggerFetch(preset.urls);
+  };
+
+  const exportPresets = () => {
+    try {
+      const dataStr = JSON.stringify(presets, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "notionpull_presets.json";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export presets:", err);
+    }
+  };
+
+  const importPresets = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (Array.isArray(parsed)) {
+          const valid = parsed.every(
+            (item) =>
+              typeof item.id === "string" &&
+              typeof item.name === "string" &&
+              Array.isArray(item.urls) &&
+              item.urls.every((u: any) => typeof u === "string")
+          );
+
+          if (valid) {
+            setPresets((prev) => {
+              const existingIds = new Set(prev.map((p) => p.id));
+              const merged = [...prev, ...parsed.filter((p) => !existingIds.has(p.id))];
+              try {
+                localStorage.setItem("notionpull_presets", JSON.stringify(merged));
+              } catch { }
+              return merged;
+            });
+          } else {
+            setError("Invalid presets file format.");
+          }
+        } else {
+          setError("Presets file must be a JSON array.");
+        }
+      } catch (err) {
+        setError("Failed to parse presets file.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   };
 
   const activeToken = useMemo(() => tokens.find((token) => token.label === activeLabel) ?? null, [tokens, activeLabel]);
@@ -1251,11 +1308,12 @@ export default function Page() {
               </div>
 
               {/* Presets List */}
-              {presets.length > 0 && (
-                <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-100 pb-3">
-                  <Bookmark className="h-4 w-4 text-zinc-400" />
-                  <span className="text-xs text-zinc-500 font-semibold">Presets:</span>
-                  {presets.map((preset) => (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-100 pb-3">
+                <Bookmark className="h-4 w-4 text-zinc-400" />
+                <span className="text-xs text-zinc-500 font-semibold mr-1">Presets:</span>
+                
+                {presets.length > 0 ? (
+                  presets.map((preset) => (
                     <div key={preset.id} className="group relative flex h-7 items-stretch rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden transition-colors hover:border-zinc-300">
                       <button
                         type="button"
@@ -1278,9 +1336,41 @@ export default function Page() {
                         <X className="h-3 w-3" />
                       </button>
                     </div>
-                  ))}
+                  ))
+                ) : (
+                  <span className="text-xs text-zinc-400 italic">No presets saved yet</span>
+                )}
+
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById("preset-import-input")?.click()}
+                    className="inline-flex items-center gap-1 rounded bg-zinc-100 border border-zinc-200 px-2 py-0.5 text-[10px] font-bold text-zinc-600 transition hover:bg-zinc-200 active:scale-95 cursor-pointer"
+                    title="Import presets from JSON"
+                  >
+                    <Upload className="h-3 w-3" />
+                    Import
+                  </button>
+                  {presets.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={exportPresets}
+                      className="inline-flex items-center gap-1 rounded bg-zinc-100 border border-zinc-200 px-2 py-0.5 text-[10px] font-bold text-zinc-600 transition hover:bg-zinc-200 active:scale-95 cursor-pointer"
+                      title="Export presets to JSON"
+                    >
+                      <Download className="h-3 w-3" />
+                      Export
+                    </button>
+                  )}
+                  <input
+                    id="preset-import-input"
+                    type="file"
+                    accept=".json"
+                    onChange={importPresets}
+                    className="hidden"
+                  />
                 </div>
-              )}
+              </div>
 
               {displayedHistory.length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
