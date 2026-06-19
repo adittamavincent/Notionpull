@@ -1120,7 +1120,7 @@ export default function Page() {
         ) : (
           <div className="space-y-6">
             <form className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={submitUrl}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3 sticky top-[4rem] bg-white z-20 pt-2 pb-3 -mx-5 px-5 border-b border-zinc-100">
                 <div className="flex flex-wrap items-center gap-2 min-w-0 flex-auto">
                   <label className="block text-sm font-medium text-zinc-900">Paste Notion page or database URLs</label>
                   {relativeTime && (
@@ -1391,7 +1391,7 @@ export default function Page() {
                 </div>
 
                 {/* Right Side: Action Buttons */}
-                <div className="shrink-0 flex flex-col gap-3 items-stretch w-full lg:w-auto lg:sticky lg:top-24">
+                <div className="shrink-0 flex flex-col gap-3 items-stretch w-full lg:w-auto lg:sticky lg:top-[8.5rem]">
                   {loadingTree && (
                     <button
                       type="button"
