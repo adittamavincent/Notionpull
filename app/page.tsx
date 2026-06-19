@@ -1117,16 +1117,20 @@ export default function Page() {
                   {urls.map((singleUrl, index) => {
                     const urlIds = extractNotionIds(singleUrl);
                     const matchedDet = detectedList.find((d) => urlIds.includes(d.id));
+                    const isDuplicate = singleUrl.trim() && urls.filter((u) => normalizeUrl(u) === normalizeUrl(singleUrl)).length > 1;
                     return (
                       <div key={index} className="flex gap-2 items-center">
                         <div className="relative flex-1 group">
                           <input
-                            className={`w-full rounded-md border pl-3.5 py-2 text-sm outline-none transition duration-150 ${
-                              matchedDet ? "pr-56" : "pr-3"
-                            } ${activeInputIndex === index
-                              ? "border-zinc-950 ring-2 ring-zinc-950/10"
-                              : "border-zinc-300 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                              }`}
+                            className={`w-full rounded-md border pl-3.5 py-2 text-sm font-mono outline-none transition duration-150 ${
+                              matchedDet && isDuplicate ? "pr-72" : matchedDet ? "pr-56" : isDuplicate ? "pr-24" : "pr-3"
+                            } ${
+                              isDuplicate
+                                ? "border-amber-500 ring-2 ring-amber-500/10 focus:border-amber-600 focus:ring-amber-600/20"
+                                : activeInputIndex === index
+                                ? "border-zinc-950 ring-2 ring-zinc-950/10"
+                                : "border-zinc-300 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+                            }`}
                             value={singleUrl}
                             onChange={(event) => {
                               setUrls(prev => {
@@ -1138,21 +1142,30 @@ export default function Page() {
                             onFocus={() => setActiveInputIndex(index)}
                             placeholder="Paste a Notion page or database URL..."
                           />
-                          {matchedDet && (
+                          {(matchedDet || isDuplicate) && (
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
-                              <span className="truncate max-w-[120px] font-medium" title={matchedDet.title}>
-                                {matchedDet.title}
-                              </span>
-                              <span className="inline-flex items-center gap-1 rounded bg-zinc-100/80 border border-zinc-200/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                                {matchedDet.type === "page" ? (
-                                  <FileText className="h-3 w-3 text-zinc-400" />
-                                ) : matchedDet.type === "database" ? (
-                                  <Database className="h-3 w-3 text-zinc-400" />
-                                ) : (
-                                  <Table2 className="h-3 w-3 text-zinc-400" />
-                                )}
-                                {matchedDet.type.replace("_", " ")}
-                              </span>
+                              {isDuplicate && (
+                                <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 animate-pulse">
+                                  Duplicate
+                                </span>
+                              )}
+                              {matchedDet && (
+                                <>
+                                  <span className="truncate max-w-[120px] font-medium" title={matchedDet.title}>
+                                    {matchedDet.title}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1 rounded bg-zinc-100/80 border border-zinc-200/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                                    {matchedDet.type === "page" ? (
+                                      <FileText className="h-3 w-3 text-zinc-400" />
+                                    ) : matchedDet.type === "database" ? (
+                                      <Database className="h-3 w-3 text-zinc-400" />
+                                    ) : (
+                                      <Table2 className="h-3 w-3 text-zinc-400" />
+                                    )}
+                                    {matchedDet.type.replace("_", " ")}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
