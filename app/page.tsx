@@ -165,8 +165,19 @@ export default function Page() {
       if (savedComments !== null) {
         setFetchComments(savedComments === "true");
       }
+      const savedDepth = localStorage.getItem("notionpull_depth");
+      if (savedDepth !== null) {
+        setDepth(savedDepth as DepthOption);
+      }
     } catch { }
   }, []);
+
+  const handleDepthChange = (val: DepthOption) => {
+    setDepth(val);
+    try {
+      localStorage.setItem("notionpull_depth", val);
+    } catch { }
+  };
 
   const handleUrlScroll = (e: React.UIEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -1249,7 +1260,7 @@ export default function Page() {
                             className={`relative rounded px-2 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
                             onClick={() => {
                               if (option !== depth) {
-                                setDepth(option);
+                                handleDepthChange(option);
                               }
                             }}
                             disabled={loadingTree}
