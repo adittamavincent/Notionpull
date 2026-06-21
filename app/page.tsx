@@ -2177,7 +2177,18 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
     if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
       if ((!node.title || node.title === "Loading...") && (node.kind === "page" || node.kind === "row")) {
         try {
-          const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`, { signal: memo.signal });
+          const detected = await apiFetch<DetectedObject & { parent?: any }>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`, { signal: memo.signal });
+          
+          if (node.parentId && memo.fetchDatabaseRelations && detected.parent?.type === "database_id" && detected.parent.database_id) {
+            node.id = detected.parent.database_id;
+            node.title = "Loading database...";
+            node.kind = "database";
+            node.status = "PENDING";
+            node.isRelationDatabase = true;
+            node.isLinkedDatabase = true;
+            return await buildNode(token, node, maxDepth, memo);
+          }
+
           node.title = detected.title;
           const detectedType = detected.type === "database" ? "database" : (detected.type === "page" ? "page" : node.kind);
           node.kind = detectedType as any;
@@ -2251,7 +2262,14 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
         }
         for (let i = 0; i < node.children.length; i++) {
           if (node.children[i].status === "PENDING") {
-            node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+            const childNode = await buildNode(token, node.children[i], maxDepth, memo);
+            const exists = node.children.some((c, idx) => idx !== i && c.id === childNode.id);
+            if (exists) {
+              node.children.splice(i, 1);
+              i--;
+            } else {
+              node.children[i] = childNode;
+            }
             memo.onNodeUpdated?.(node.id, () => ({ ...node }));
           }
         }
@@ -2305,6 +2323,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               depth: node.depth + 1,
               parentId: node.id,
               isLinkedDatabase: true,
+              isRelationDatabase: true,
               status: "PENDING"
             });
           }
@@ -2318,7 +2337,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               ? node.selectedColumns
               : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
 
-          const cacheKey = `${token}:rows:${node.id}:${node.dataSourceId ?? node.id}:${rowSourceKind}:${node.viewId ?? ""}`;
+          const cacheKey = `${token}:rows:${node.id}:${node.dataSourceId ?? node.id}:${rowSourceKind}:${node.viewId ?? ""}${node.isRelationDatabase ? ":relation" : ""}`;
           if (memo.rows.has(cacheKey)) {
             const rows = await memo.rows.get(cacheKey)!;
             const newRowNodes = rows.map((row) => ({
@@ -2353,7 +2372,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
                   memo.onNodeUpdated?.(node.id, () => ({ ...node }));
                 }
               }
-            });
+            }, node.isRelationDatabase);
           }
         }
       }
@@ -2452,9 +2471,10 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
   ));
 }
 
-function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number, onPageFetched?: (rows: NotionPage[]) => Promise<void>): Promise<NotionPage[]> {
-  const limit = (depth !== undefined && memo.maxChildrenMap) ? getLimitForDepth(depth, memo.maxChildrenMap) : memo.maxChildren;
-  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit, onPageFetched));
+function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number, onPageFetched?: (rows: NotionPage[]) => Promise<void>, isRelation?: boolean): Promise<NotionPage[]> {
+  const limit = isRelation ? Infinity : ((depth !== undefined && memo.maxChildrenMap) ? getLimitForDepth(depth, memo.maxChildrenMap) : memo.maxChildren);
+  const cacheKey = `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}${isRelation ? ":relation" : ""}`;
+  return memoFetch(memo.rows, cacheKey, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit, onPageFetched));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {

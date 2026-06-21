@@ -76,6 +76,7 @@ export type TreeNodeData = {
   previewColumn?: string;
   previewColumns?: string[];
   isLinkedDatabase?: boolean;
+  isRelationDatabase?: boolean;
   token?: string;
   status?: "PENDING" | "DONE" | "ERROR";
   block?: NotionBlock;

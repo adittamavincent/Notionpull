@@ -210,7 +210,7 @@ export async function GET(request: Request) {
 
     if (targetType === "page") {
       const page = await notionFetch<NotionPage>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(traceRoot, "page") });
-      return Response.json({ type: "page", id: page.id, title: pageTitle(page), properties: page.properties });
+      return Response.json({ type: "page", id: page.id, title: pageTitle(page), properties: page.properties, parent: page.parent });
     }
 
     if (targetType === "block") {
