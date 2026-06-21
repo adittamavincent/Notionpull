@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-const SESSION_DIR = path.join(process.cwd(), ".notionpull_sessions");
+const SESSION_DIR = process.env.VERCEL === "1" ? path.join("/tmp", ".notionpull_sessions") : path.join(process.cwd(), ".notionpull_sessions");
 
 async function ensureDir() {
   try {
