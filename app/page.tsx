@@ -1894,9 +1894,25 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   try {
     if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
       if (node.depth >= maxDepth) return node;
+
+      if ((!node.title || node.title === "Loading...") && (node.kind === "page" || node.kind === "row")) {
+        try {
+          const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`, { signal: memo.signal });
+          node.title = detected.title;
+          const detectedType = detected.type === "database" ? "database" : (detected.type === "page" ? "page" : node.kind);
+          node.kind = detectedType as any;
+        } catch {
+          node.title = node.title || "Untitled";
+        }
+      }
+
+      if ((node.kind as any) === "database" || (node.kind as any) === "data_source") {
+        return buildNode(token, node, maxDepth, memo);
+      }
+
       if (!node.children) {
         const body = await memoPageChildren(token, node.id, memo);
-        node.children = body.results.map((child: any) => ({
+        let childNodes: TreeNodeData[] = body.results.map((child: any) => ({
           id: child.id,
           title: child.title,
           kind: child.type as any,
@@ -1904,6 +1920,32 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           parentId: node.id,
           dataSourceName: child.dataSourceName
         }));
+
+        if (node.kind === "row" && node.page && memo.fetchLinkedChildren) {
+          const relationIds = new Set<string>();
+          for (const prop of Object.values(node.page.properties ?? {})) {
+            if (prop && (prop as any).type === "relation" && Array.isArray((prop as any).relation)) {
+              for (const rel of (prop as any).relation) {
+                if (rel.id) relationIds.add(rel.id);
+              }
+            }
+          }
+
+          const existingIds = new Set(childNodes.map(c => c.id));
+          const newRelationNodes = Array.from(relationIds)
+            .filter(id => !existingIds.has(id))
+            .map(id => ({
+              id,
+              title: "Loading...",
+              kind: "page" as const,
+              depth: node.depth + 1,
+              parentId: node.id
+            }));
+
+          childNodes = [...childNodes, ...newRelationNodes];
+        }
+
+        node.children = childNodes;
       }
       node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
     }
