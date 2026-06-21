@@ -74,11 +74,23 @@ function TreeRow({ node, selectionState, collapsed, disabled, onToggleCollapse, 
 
   const isLoadingPlaceholder = node.id.endsWith("-loading-placeholder");
 
+  const getDepthBgClass = (depth: number) => {
+    switch (depth) {
+      case 0: return "bg-white hover:bg-zinc-50";
+      case 1: return "bg-slate-100 hover:bg-slate-200";
+      case 2: return "bg-blue-100 hover:bg-blue-200";
+      case 3: return "bg-indigo-100 hover:bg-indigo-200";
+      case 4: return "bg-violet-100 hover:bg-violet-200";
+      case 5: return "bg-fuchsia-100 hover:bg-fuchsia-200";
+      default: return "bg-rose-100 hover:bg-rose-200";
+    }
+  };
+
   return (
     <div
       className={isLoadingPlaceholder 
-        ? "group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm select-none pointer-events-none cursor-default opacity-60 italic text-zinc-400"
-        : "group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50 cursor-pointer select-none"
+        ? `group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm select-none pointer-events-none cursor-default opacity-60 italic text-zinc-400 ${getDepthBgClass(node.depth)}`
+        : `group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm cursor-pointer select-none ${getDepthBgClass(node.depth)}`
       }
       style={style}
       onMouseEnter={() => {
@@ -191,6 +203,13 @@ function TreeRow({ node, selectionState, collapsed, disabled, onToggleCollapse, 
           {(node.kind === "database" || node.kind === "data_source") && !!node.isLinkedDatabase 
             ? "LINKED DATABASE" 
             : node.kind.replace("_", " ")}
+        </span>
+        
+        <span 
+          className="rounded bg-blue-50/50 border border-blue-100 px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider text-blue-500 shrink-0"
+          title={`Depth Level ${node.depth}`}
+        >
+          L{node.depth}
         </span>
 
         {node.status && (
