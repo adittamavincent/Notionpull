@@ -321,7 +321,7 @@ export default function Page() {
       const btn = (e.target as HTMLElement).closest("button[data-depth-option]");
       if (!btn) return;
       const option = btn.getAttribute("data-depth-option") as DepthOption;
-      if (!option) return;
+      if (!option || option === "Surface") return;
 
       e.preventDefault();
       const direction = e.deltaY < 0 ? 1 : -1;
@@ -348,6 +348,8 @@ export default function Page() {
     if (!hoveredDepth) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!hoveredDepth || hoveredDepth === "Surface") return;
+
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
         const direction = e.key === "ArrowUp" ? 1 : -1;
@@ -1564,10 +1566,12 @@ export default function Page() {
                             disabled={loadingTree}
                           >
                             <span>{option}</span>
-                            <span className={`ml-1 text-[9px] font-mono font-medium ${depth === option ? "text-zinc-300" : "text-zinc-400"}`}>
-                              ({maxChildrenMap[option] === 0 ? "max" : String(maxChildrenMap[option]).padStart(3, "0")})
-                            </span>
-                            {hoveredDepth === option && (
+                            {option !== "Surface" && (
+                              <span className={`ml-1 text-[9px] font-mono font-medium ${depth === option ? "text-zinc-300" : "text-zinc-400"}`}>
+                                ({maxChildrenMap[option] === 0 ? "max" : String(maxChildrenMap[option]).padStart(3, "0")})
+                              </span>
+                            )}
+                            {hoveredDepth === option && option !== "Surface" && (
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 bg-zinc-950 text-white text-[10px] py-1.5 px-2.5 rounded-md shadow-lg pointer-events-none whitespace-nowrap flex flex-col items-center border border-zinc-800 leading-tight">
                                 <span className="font-bold font-mono">limit: {maxChildrenMap[option] === 0 ? "max" : String(maxChildrenMap[option]).padStart(3, "0")}</span>
                                 <span className="text-[8px] text-zinc-400 mt-0.5">Scroll / Arrow Up/Down to adjust</span>
