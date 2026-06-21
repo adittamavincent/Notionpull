@@ -175,6 +175,20 @@ function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
   if (prop?.id) attrs.push(`property-id="${escapeXmlAttribute(prop.id)}"`);
   if (detail?.width !== undefined) attrs.push(`width="${detail.width}"`);
 
+  if (prop?.type === "relation" && prop.relation?.database_id) {
+    attrs.push(`relation-database-id="${escapeXmlAttribute(prop.relation.database_id)}"`);
+  } else if (prop?.type === "rollup" && prop.rollup) {
+    const relName = prop.rollup.relation_property_name;
+    const relId = prop.rollup.relation_property_id;
+    let relProp = item.properties && relName ? item.properties[relName] : null;
+    if (!relProp && item.properties && relId) {
+      relProp = Object.values(item.properties).find((p: any) => p.id === relId);
+    }
+    if (relProp && relProp.type === "relation" && relProp.relation?.database_id) {
+      attrs.push(`relation-database-id="${escapeXmlAttribute(relProp.relation.database_id)}"`);
+    }
+  }
+
   const options = propertyOptions(prop);
   const desc = prop?.description ? `<description>${escapeXmlText(prop.description)}</description>` : "";
   if (!options.length && !desc) return `<property ${attrs.join(" ")} />`;
