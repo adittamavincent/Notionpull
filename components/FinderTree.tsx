@@ -378,7 +378,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
   }
 
   const treeContent = visibleFlat.length <= 100 ? (
-    <div className="overflow-hidden rounded-lg">
+    <div className="overflow-auto rounded-lg max-h-[calc(100vh-320px)] min-h-[300px]">
       {visibleFlat.map((node) => (
         <TreeRow
           key={node.id}
@@ -394,7 +394,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
       ))}
     </div>
   ) : (
-    <div ref={parentRef} className="h-[560px] overflow-auto rounded-lg">
+    <div ref={parentRef} className="h-[calc(100vh-320px)] min-h-[400px] overflow-auto rounded-lg">
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map((item) => {
           const node = visibleFlat[item.index];
