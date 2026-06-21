@@ -56,18 +56,23 @@ export async function GET(request: Request) {
 
     if (!targetType) {
       try {
-        const ds = await notionFetch<any>(token, `/data_sources/${targetId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
-        return Response.json({
-          type: "data_source",
-          id: ds.id,
-          title: ds.name ?? ds.title?.[0]?.plain_text ?? "Untitled data source",
-          dataSourceId: ds.id,
-          dataSourceName: ds.name,
-          columns: Object.keys(ds.properties ?? {}),
-          properties: ds.properties ?? {}
-        });
-      } catch (dsErr: any) {
-        throw new Error("Object not found or no access");
+        await notionFetch<NotionDatabase>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(traceRoot, "database_check") });
+        targetType = "database";
+      } catch (dbErr: any) {
+        try {
+          const ds = await notionFetch<any>(token, `/data_sources/${targetId}`, {}, { tracePath: traceChild(traceRoot, "data-source") });
+          return Response.json({
+            type: "data_source",
+            id: ds.id,
+            title: ds.name ?? ds.title?.[0]?.plain_text ?? "Untitled data source",
+            dataSourceId: ds.id,
+            dataSourceName: ds.name,
+            columns: Object.keys(ds.properties ?? {}),
+            properties: ds.properties ?? {}
+          });
+        } catch (dsErr: any) {
+          throw new Error("Object not found or no access");
+        }
       }
     }
 
