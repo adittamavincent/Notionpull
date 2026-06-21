@@ -2150,12 +2150,6 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   memo.onNodeUpdated?.(node.id, () => ({ ...node }));
   try {
     if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
-      if (node.depth >= maxDepth) {
-        node.status = "DONE";
-        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
-        return node;
-      }
-
       if ((!node.title || node.title === "Loading...") && (node.kind === "page" || node.kind === "row")) {
         try {
           const detected = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(node.id)}`, { signal: memo.signal });
@@ -2170,63 +2164,71 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
         }
       }
 
-      if (!node.children) {
-        node.children = [];
-        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
-
-        let childNodes: TreeNodeData[] = [];
-        if (node.depth < maxDepth) {
-            const body = await memoPageChildren(token, node.id, memo);
-            childNodes = body.results.map((child: any) => ({
-              id: child.id,
-              title: child.title,
-              kind: child.type as any,
-              depth: node.depth + 1,
-              parentId: node.id,
-              dataSourceName: child.dataSourceName,
-              status: "PENDING",
-              block: child
-            }));
+      if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
+        if (node.depth >= maxDepth) {
+          node.status = "DONE";
+          memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+          return node;
         }
 
-        if ((node.kind === "row" || node.kind === "page") && node.page && memo.fetchLinkedChildren) {
-          const relationIds = new Set<string>();
-          for (const prop of Object.values(node.page.properties ?? {})) {
-            if (prop && (prop as any).type === "relation" && Array.isArray((prop as any).relation)) {
-              for (const rel of (prop as any).relation) {
-                if (rel.id && rel.id !== node.id) relationIds.add(rel.id);
-              }
-            }
-            if (prop && ["rich_text", "title", "url"].includes((prop as any).type)) {
-              const extracted = extractNotionIds(JSON.stringify(prop));
-              for (const id of extracted) {
-                if (id !== node.id) relationIds.add(id);
-              }
-            }
+        if (!node.children) {
+          node.children = [];
+          memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+
+          let childNodes: TreeNodeData[] = [];
+          if (node.depth < maxDepth) {
+              const body = await memoPageChildren(token, node.id, memo);
+              childNodes = body.results.map((child: any) => ({
+                id: child.id,
+                title: child.title,
+                kind: child.type as any,
+                depth: node.depth + 1,
+                parentId: node.id,
+                dataSourceName: child.dataSourceName,
+                status: "PENDING",
+                block: child
+              }));
           }
 
-          const existingIds = new Set(childNodes.map(c => c.id));
-          const newRelationNodes = Array.from(relationIds)
-            .filter(id => !existingIds.has(id))
-            .map(id => ({
-              id,
-              title: "Loading...",
-              kind: "page" as const,
-              depth: node.depth + 1,
-              parentId: node.id,
-              status: "PENDING" as const
-            }));
+          if ((node.kind === "row" || node.kind === "page") && node.page && memo.fetchLinkedChildren) {
+            const relationIds = new Set<string>();
+            for (const prop of Object.values(node.page.properties ?? {})) {
+              if (prop && (prop as any).type === "relation" && Array.isArray((prop as any).relation)) {
+                for (const rel of (prop as any).relation) {
+                  if (rel.id && rel.id !== node.id) relationIds.add(rel.id);
+                }
+              }
+              if (prop && ["rich_text", "title", "url"].includes((prop as any).type)) {
+                const extracted = extractNotionIds(JSON.stringify(prop));
+                for (const id of extracted) {
+                  if (id !== node.id) relationIds.add(id);
+                }
+              }
+            }
 
-          childNodes = [...childNodes, ...newRelationNodes];
-        }
+            const existingIds = new Set(childNodes.map(c => c.id));
+            const newRelationNodes = Array.from(relationIds)
+              .filter(id => !existingIds.has(id))
+              .map(id => ({
+                id,
+                title: "Loading...",
+                kind: "page" as const,
+                depth: node.depth + 1,
+                parentId: node.id,
+                status: "PENDING" as const
+              }));
 
-        node.children.push(...childNodes);
-        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
-      }
-      for (let i = 0; i < node.children.length; i++) {
-        if (node.children[i].status === "PENDING") {
-          node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+            childNodes = [...childNodes, ...newRelationNodes];
+          }
+
+          node.children.push(...childNodes);
           memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+        }
+        for (let i = 0; i < node.children.length; i++) {
+          if (node.children[i].status === "PENDING") {
+            node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+            memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+          }
         }
       }
     }
