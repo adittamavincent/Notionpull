@@ -11,7 +11,7 @@ import { type ExportItem } from "@/lib/export";
 import { extractNotionIds, firstTitleProperty, propertyValue } from "@/lib/notion";
 import { getActiveTokenLabel, getTokens } from "@/lib/tokens";
 import type { DetectedObject, NotionBlock, NotionPage, NotionTokenEntry, RowsResponse, TreeNodeData } from "@/types/notion";
-import { History, RefreshCw, LogOut, X, FileText, Database, Table2, Bookmark, Download, Upload } from "lucide-react";
+import { History, RefreshCw, LogOut, X, FileText, Database, Table2, Bookmark, Download, Upload, Activity } from "lucide-react";
 import Image from "next/image";
 
 type DepthOption = "Surface" | "1" | "2" | "3" | "4" | "5" | "All";
@@ -341,7 +341,7 @@ export default function Page() {
     return () => {
       el.removeEventListener("wheel", handleWheelEvent);
     };
-  }, []);
+  }, [depthContainer]);
 
   // Handle keyboard up/down arrows when a depth option is hovered
   useEffect(() => {
@@ -693,7 +693,7 @@ export default function Page() {
     setActiveLabel(nextActive);
   }
 
-  async function detectWithAnyToken(id: string, viewId?: string, signal?: AbortSignal): Promise<DetectedObject> {
+  const detectWithAnyToken = useCallback(async (id: string, viewId?: string, signal?: AbortSignal): Promise<DetectedObject> => {
     if (tokens.length === 0) {
       throw new Error("No tokens available. Add a token first.");
     }
@@ -707,7 +707,7 @@ export default function Page() {
     if (successful) return successful.value;
     const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
     throw firstError?.reason || new Error("Failed to detect with all tokens");
-  }
+  }, [tokens]);
 
   const triggerQuickDetect = useCallback(async (url: string) => {
     if (loadingTree) return;
@@ -757,7 +757,7 @@ export default function Page() {
         return next;
       });
     }
-  }, [detectedList, tokens, loadingTree]);
+  }, [detectedList, loadingTree, detectWithAnyToken]);
 
   useEffect(() => {
     urls.forEach(url => {
@@ -853,21 +853,27 @@ export default function Page() {
     await triggerFetch(urls);
   }
 
+  const lastUpdateRef = useRef<number>(0);
+  const updateTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const updateTreeNode = useCallback((nodeId: string, updater: (node: TreeNodeData) => TreeNodeData) => {
-    setNodes(prev => {
-      const walk = (list: TreeNodeData[]): TreeNodeData[] => {
-        return list.map(n => {
-          if (n.id === nodeId) {
-            return updater(n);
-          }
-          if (n.children) {
-            return { ...n, children: walk(n.children) };
-          }
-          return n;
-        });
-      };
-      return walk(prev);
-    });
+    // We throttle the React state updates to prevent UI hangs during massive recursive fetches.
+    // Since buildNode mutates the nodes in place, we just need to trigger a re-render.
+    const triggerUpdate = () => setNodes(prev => [...prev]);
+
+    const now = Date.now();
+    if (now - lastUpdateRef.current > 100) {
+      lastUpdateRef.current = now;
+      triggerUpdate();
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = null;
+    } else if (!updateTimerRef.current) {
+      updateTimerRef.current = setTimeout(() => {
+        lastUpdateRef.current = Date.now();
+        triggerUpdate();
+        updateTimerRef.current = null;
+      }, 100);
+    }
   }, []);
 
   async function refetchUrl(index: number) {
@@ -1494,9 +1500,10 @@ export default function Page() {
               Reset Session
             </button>
 
-            <div className="flex gap-2">
+            <div className="flex items-center gap-3">
               <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
-                Debug
+                <Activity className="h-4 w-4" />
+                <span className="hidden sm:inline">Debug Logs</span>
               </button>
               <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setManagerOpen(true)}>
                 Tokens
@@ -1700,13 +1707,14 @@ export default function Page() {
                             onFocus={() => setActiveInputIndex(index)}
                             placeholder="Paste a Notion page or database URL..."
                           />
-                          {isDetecting ? (
+                          {(isDetecting || matchedDet || isDuplicate) && (
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
-                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Detecting...</span>
-                            </div>
-                          ) : (matchedDet || isDuplicate) && (
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
+                              {isDetecting && (
+                                <div className="flex items-center gap-1.5">
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                                  {!matchedDet && <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Detecting...</span>}
+                                </div>
+                              )}
                               {isDuplicate && (
                                 <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 animate-pulse">
                                   Duplicate
