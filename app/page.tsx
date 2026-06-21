@@ -2254,7 +2254,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       node.isLinkedDatabase = metadata.isLinkedDatabase ?? node.isLinkedDatabase;
       const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind as "database" | "data_source");
 
-      if (node.depth >= 30) {
+      if (node.depth >= maxDepth) {
         node.status = "DONE";
         memo.onNodeUpdated?.(node.id, () => ({ ...node }));
         return node;
@@ -2343,7 +2343,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       if (node.children) {
         for (let i = 0; i < node.children.length; i++) {
           if (node.children[i].status === "PENDING") {
-            if (node.children[i].depth > 30) {
+            if (node.children[i].depth > maxDepth) {
               node.children[i].status = "DONE";
               memo.onNodeUpdated?.(node.id, () => ({ ...node }));
             } else {
