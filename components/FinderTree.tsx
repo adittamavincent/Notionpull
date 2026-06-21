@@ -225,7 +225,7 @@ function TreeRow({ node, selectionState, collapsed, disabled, onToggleCollapse, 
         )}
       </div>
 
-      {isDatabase && onConfigureDatabase && (
+      {isDatabase && onConfigureDatabase && !disabled && node.status !== "PENDING" && (
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {

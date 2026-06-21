@@ -437,7 +437,9 @@ export default function Page() {
   // Load URL History from LocalStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("notionpull_history_v2");
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_history_v2_${user}` : "notionpull_history_v2";
+      const saved = localStorage.getItem(key);
       if (saved) {
         const history = JSON.parse(saved);
         if (Array.isArray(history)) {
@@ -451,10 +453,12 @@ export default function Page() {
     try {
       if (!type) return;
       const displayTitle = (title && title.trim()) ? title.trim() : "Untitled";
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_history_v2_${user}` : "notionpull_history_v2";
 
       let hist: HistoryItem[] = [];
       try {
-        const saved = localStorage.getItem("notionpull_history_v2");
+        const saved = localStorage.getItem(key);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
@@ -465,15 +469,17 @@ export default function Page() {
 
       const newItem: HistoryItem = { url: newUrl, title: displayTitle, type };
       const updated = [newItem, ...hist.filter((h: HistoryItem) => normalizeUrl(h.url) !== normalizeUrl(newUrl))].slice(0, 10);
-      localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
+      localStorage.setItem(key, JSON.stringify(updated));
       setUrlHistory(updated);
     } catch { }
   };
 
   const removeUrlHistory = (url: string) => {
     try {
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_history_v2_${user}` : "notionpull_history_v2";
       const updated = urlHistory.filter((h) => normalizeUrl(h.url) !== normalizeUrl(url));
-      localStorage.setItem("notionpull_history_v2", JSON.stringify(updated));
+      localStorage.setItem(key, JSON.stringify(updated));
       setUrlHistory(updated);
     } catch { }
   };
@@ -481,7 +487,9 @@ export default function Page() {
   // Load Presets from LocalStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("notionpull_presets");
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_presets_${user}` : "notionpull_presets";
+      const saved = localStorage.getItem(key);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -506,18 +514,19 @@ export default function Page() {
   }, [exportDropdownOpen]);
 
   const savePreset = (name: string) => {
-    if (!name.trim()) return;
-    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
-    if (!activeUrls.length) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
     const newPreset: Preset = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      urls: activeUrls
+      id: Math.random().toString(36).substring(2, 9),
+      name: trimmed,
+      urls: [...urls],
     };
     const updated = [...presets, newPreset];
     setPresets(updated);
     try {
-      localStorage.setItem("notionpull_presets", JSON.stringify(updated));
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_presets_${user}` : "notionpull_presets";
+      localStorage.setItem(key, JSON.stringify(updated));
     } catch { }
     setNewPresetName("");
     setShowSavePreset(false);
@@ -527,7 +536,9 @@ export default function Page() {
     const updated = presets.filter(p => p.id !== id);
     setPresets(updated);
     try {
-      localStorage.setItem("notionpull_presets", JSON.stringify(updated));
+      const user = localStorage.getItem("notionpull_username");
+      const key = user ? `notionpull_presets_${user}` : "notionpull_presets";
+      localStorage.setItem(key, JSON.stringify(updated));
     } catch { }
   };
 
@@ -590,10 +601,11 @@ export default function Page() {
 
           if (valid) {
             setPresets((prev) => {
-              const existingIds = new Set(prev.map((p) => p.id));
-              const merged = [...prev, ...parsed.filter((p) => !existingIds.has(p.id))];
+              const merged = [...prev, ...parsed];
               try {
-                localStorage.setItem("notionpull_presets", JSON.stringify(merged));
+                const user = localStorage.getItem("notionpull_username");
+                const key = user ? `notionpull_presets_${user}` : "notionpull_presets";
+                localStorage.setItem(key, JSON.stringify(merged));
               } catch { }
               return merged;
             });
@@ -2202,7 +2214,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               }));
           }
 
-          if ((node.kind === "row" || node.kind === "page") && node.page && memo.fetchLinkedChildren) {
+          if ((node.kind === "row" || node.kind === "page") && node.page && memo.fetchLinkedChildren && node.depth + 1 <= maxDepth) {
             const relationIds = new Set<string>();
             for (const prop of Object.values(node.page.properties ?? {})) {
               if (prop && (prop as any).type === "relation" && Array.isArray((prop as any).relation)) {
@@ -2247,6 +2259,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
     if (node.kind === "database" || node.kind === "data_source") {
       const metadata = await resolveContainerMetadata(token, node, memo);
       node.kind = metadata.kind;
+      node.title = metadata.title ?? node.title;
       node.viewId = node.viewId ?? metadata.viewId;
       node.dataSourceId = metadata.dataSourceId;
       node.dataSourceName = metadata.dataSourceName ?? node.dataSourceName;
@@ -2267,7 +2280,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       if (!node.children) {
         node.children = [];
         
-        if (memo.fetchDatabaseRelations && node.properties) {
+        if (memo.fetchDatabaseRelations && node.properties && node.depth + 1 <= maxDepth) {
           const relationDbIds = new Set<string>();
           for (const prop of Object.values(node.properties)) {
             if (prop.type === "relation" && prop.relation?.database_id) {
@@ -2370,12 +2383,13 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
 
 
 
-async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails" | "isLinkedDatabase" | "description">> {
+async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "title" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails" | "isLinkedDatabase" | "description">> {
   if (node.dataSourceId && node.columns && node.properties) {
     return {
       kind: node.kind === "data_source" ? "data_source" : "database",
       dataSourceId: node.dataSourceId,
       dataSourceName: node.dataSourceName,
+      title: node.title,
       columns: node.columns,
       views: node.views,
       columnDetails: node.columnDetails,
@@ -2393,6 +2407,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       kind: node.kind === "data_source" ? "data_source" : "database",
       dataSourceId: metadata.dataSourceId,
       dataSourceName: metadata.dataSourceName ?? node.dataSourceName,
+      title: metadata.title,
       columns: metadata.columns,
       selectedColumns: metadata.selectedColumns,
       views: metadata.views ?? node.views,
@@ -2409,6 +2424,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       kind: detected.type === "data_source" ? "data_source" : "database",
       dataSourceId: detected.dataSourceId ?? node.id,
       dataSourceName: detected.dataSourceName ?? node.dataSourceName,
+      title: detected.title,
       columns: detected.columns ?? node.columns,
       selectedColumns: detected.selectedColumns ?? node.selectedColumns,
       views: detected.views ?? node.views,
