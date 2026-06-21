@@ -1780,7 +1780,7 @@ export default function Page() {
 
 
 
-            {detected && (
+            {(detected || loadingTree) && (
               <FinderTree
                 nodes={nodes}
                 selected={selected}
