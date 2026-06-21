@@ -112,7 +112,16 @@ export default function Page() {
   const [showRelationIds, setShowRelationIds] = useState(false);
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
   const [fetchComments, setFetchComments] = useState(false);
-  const [maxChildren, setMaxChildren] = useState<number>(5);
+  const [maxChildrenMap, setMaxChildrenMap] = useState<Record<DepthOption, number>>({
+    Surface: 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    All: 0
+  });
+  const maxChildren = maxChildrenMap[depth];
   const [resetLog, setResetLog] = useState(true);
 
   // Load from localStorage on mount to avoid hydration mismatch
@@ -126,9 +135,25 @@ export default function Page() {
       if (savedLinked !== null) {
         setFetchLinkedChildren(savedLinked === "true");
       }
-      const savedMaxChildren = localStorage.getItem("notionpull_max_children");
-      if (savedMaxChildren !== null) {
-        setMaxChildren(Number(savedMaxChildren));
+      const savedMaxChildrenMap = localStorage.getItem("notionpull_max_children_map");
+      if (savedMaxChildrenMap !== null) {
+        try {
+          setMaxChildrenMap(JSON.parse(savedMaxChildrenMap));
+        } catch { }
+      } else {
+        const savedMaxChildren = localStorage.getItem("notionpull_max_children");
+        if (savedMaxChildren !== null) {
+          const val = Number(savedMaxChildren);
+          setMaxChildrenMap({
+            Surface: val,
+            "1": val,
+            "2": val,
+            "3": val,
+            "4": val,
+            "5": val,
+            All: val
+          });
+        }
       }
       const savedResetLog = localStorage.getItem("notionpull_reset_log");
       if (savedResetLog !== null) {
@@ -174,10 +199,13 @@ export default function Page() {
   };
 
   const handleMaxChildrenChange = (val: number) => {
-    setMaxChildren(val);
-    try {
-      localStorage.setItem("notionpull_max_children", String(val));
-    } catch { }
+    setMaxChildrenMap(prev => {
+      const next = { ...prev, [depth]: val };
+      try {
+        localStorage.setItem("notionpull_max_children_map", JSON.stringify(next));
+      } catch { }
+      return next;
+    });
   };
 
   const handleResetLogChange = (val: boolean) => {
@@ -1148,7 +1176,7 @@ export default function Page() {
                   {/* Before Fetch Settings */}
                   <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-zinc-500">Max DB Children</span>
+                      <span className="text-xs font-semibold text-zinc-500">Max DB Children ({depth})</span>
                       <input
                         type="number"
                         className="w-16 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
@@ -1176,7 +1204,10 @@ export default function Page() {
                             }}
                             disabled={loadingTree}
                           >
-                            {option}
+                            <span>{option}</span>
+                            <span className={`ml-1 text-[9px] font-normal ${depth === option ? "text-zinc-300" : "text-zinc-400"}`}>
+                              ({maxChildrenMap[option] === 0 ? "Max" : maxChildrenMap[option]})
+                            </span>
                           </button>
                         ))}
                       </div>
