@@ -2064,6 +2064,7 @@ export default function Page() {
                 loading={loadingTree}
                 onToggle={toggleNode}
                 onConfigureDatabase={handleConfigureDatabase}
+                maxDepth={depthValue(depth)}
               />
             )}
           </div>

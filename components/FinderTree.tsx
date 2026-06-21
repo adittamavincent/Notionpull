@@ -11,6 +11,7 @@ type Props = {
   loading: boolean;
   onToggle: (node: TreeNodeData, checked: boolean) => void;
   onConfigureDatabase?: (node: TreeNodeData) => void;
+  maxDepth?: number;
 };
 
 export function flattenTree(nodes: TreeNodeData[]): TreeNodeData[] {
@@ -250,7 +251,7 @@ function TreeRow({ node, selectionState, collapsed, disabled, onToggleCollapse, 
   );
 }
 
-export function FinderTree({ nodes, selected, loading, onToggle, onConfigureDatabase }: Props) {
+export function FinderTree({ nodes, selected, loading, onToggle, onConfigureDatabase, maxDepth }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [dragInfo, setDragInfo] = useState<{ isDragging: boolean; checked: boolean; startId: string | null }>({
     isDragging: false,
@@ -337,7 +338,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
         if (!collapsed.has(node.id)) {
           if (node.children?.length) {
             traverse(node.children);
-          } else if (node.status === "PENDING") {
+          } else if (node.status === "PENDING" && node.depth < (maxDepth ?? Infinity)) {
             list.push({
               id: `${node.id}-loading-placeholder`,
               title: "Loading children...",
@@ -352,7 +353,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
     };
     traverse(nodes);
     return list;
-  }, [nodes, collapsed]);
+  }, [nodes, collapsed, maxDepth]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
