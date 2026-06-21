@@ -1483,7 +1483,7 @@ export default function Page() {
 
             <button
               onClick={() => {
-                if (confirm("Are you sure you want to log out and reset your session? All your cached tree data will be deleted.")) {
+                if (confirm("Are you sure you want to reset your user data? This will log you out and clear your current user session.")) {
                   fetch(`/api/session?username=${encodeURIComponent(username)}`, { method: "DELETE" })
                     .then(() => {
                       localStorage.removeItem("notionpull_username");
@@ -1499,7 +1499,7 @@ export default function Page() {
               className="text-sm font-medium text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
             >
               <LogOut className="w-4 h-4" />
-              Reset Session
+              Reset User
             </button>
 
             <div className="flex items-center gap-3">
@@ -1656,7 +1656,7 @@ export default function Page() {
                         onClick={clearWork}
                         className="text-xs font-bold text-red-600 hover:text-red-800 transition active:scale-95"
                       >
-                        Reset Session
+                        Reset Workspace
                       </button>
                     </div>
                   )}
