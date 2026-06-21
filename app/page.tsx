@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FinderTree, flattenTree } from "@/components/FinderTree";
 import { DatabaseConfigModal } from "@/components/DatabaseConfigModal";
 import { ExportModal } from "@/components/ExportModal";
@@ -609,8 +609,69 @@ export default function Page() {
     setActiveLabel(nextActive);
   }
 
+  async function detectWithAnyToken(id: string, viewId?: string, signal?: AbortSignal): Promise<DetectedObject> {
+    if (tokens.length === 0) {
+      throw new Error("No tokens available. Add a token first.");
+    }
+    const results = await Promise.allSettled(
+      tokens.map(async (t) => {
+        const res = await apiFetch<DetectedObject>(t.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal });
+        return { ...res, token: t.token };
+      })
+    );
+    const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
+    if (successful) return successful.value;
+    const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+    throw firstError?.reason || new Error("Failed to detect with all tokens");
+  }
+
+  const triggerQuickDetect = useCallback(async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    const ids = extractNotionIds(trimmed);
+    if (!ids.length) return;
+
+    const alreadyDetected = detectedList.some(d => ids.includes(d.id));
+    if (alreadyDetected) return;
+
+    let viewId = "";
+    try {
+      const parsedUrl = new URL(trimmed);
+      viewId = parsedUrl.searchParams.get("v") || "";
+    } catch { }
+
+    try {
+      const results = await Promise.allSettled(
+        ids.map(id => detectWithAnyToken(id, viewId))
+      );
+      const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
+      if (successful) {
+        const detectedObj = successful.value;
+        setDetectedList(prev => {
+          const idx = prev.findIndex(d => d.id === detectedObj.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = detectedObj;
+            return next;
+          }
+          return [...prev, detectedObj];
+        });
+      }
+    } catch (err) {
+      // Quietly ignore background errors
+    }
+  }, [detectedList, tokens]);
+
+  useEffect(() => {
+    urls.forEach(url => {
+      if (url.trim()) {
+        triggerQuickDetect(url);
+      }
+    });
+  }, [urls, triggerQuickDetect]);
+
   async function triggerFetch(targetUrls: string[]) {
-    if (!activeToken) return;
+    if (tokens.length === 0) return;
 
     const activeUrls = targetUrls.map(u => u.trim()).filter(Boolean);
     if (!activeUrls.length) return;
@@ -655,9 +716,9 @@ export default function Page() {
           viewId = parsedUrl.searchParams.get("v") || "";
         } catch { }
 
-        // Try all IDs in parallel for faster detection
+        // Try all IDs with all tokens
         const results = await Promise.allSettled(
-          ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
+          ids.map(id => detectWithAnyToken(id, viewId, controller.signal))
         );
 
         const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
@@ -696,7 +757,7 @@ export default function Page() {
   }
 
   async function refetchUrl(index: number) {
-    if (!activeToken) return;
+    if (tokens.length === 0) return;
     const singleUrl = urls[index]?.trim();
     if (!singleUrl) return;
 
@@ -728,7 +789,7 @@ export default function Page() {
       } catch { }
 
       const results = await Promise.allSettled(
-        ids.map(id => apiFetch<DetectedObject>(activeToken.token, `/api/notion/detect?id=${encodeURIComponent(id)}${viewId ? `&viewId=${encodeURIComponent(viewId)}` : ""}`, { signal: controller.signal }))
+        ids.map(id => detectWithAnyToken(id, viewId, controller.signal))
       );
 
       const successful = results.find(r => r.status === "fulfilled") as PromiseFulfilledResult<DetectedObject> | undefined;
@@ -765,10 +826,12 @@ export default function Page() {
         columns: detectedObj.columns,
         selectedColumns: detectedObj.selectedColumns,
         properties: detectedObj.properties,
-        isLinkedDatabase: detectedObj.isLinkedDatabase
+        isLinkedDatabase: detectedObj.isLinkedDatabase,
+        token: detectedObj.token
       };
 
-      const freshRoot = await buildNode(activeToken.token, rootSeed, maxDepth, {
+      const nodeToken = detectedObj.token || activeToken?.token || "";
+      const freshRoot = await buildNode(nodeToken, rootSeed, maxDepth, {
         pageChildren: pageChildrenCache.current,
         databases: databaseCache.current,
         rows: rowsCache.current,
@@ -812,7 +875,7 @@ export default function Page() {
   }
 
   async function loadTree(objects: DetectedObject[] = detectedList, currentDepth: DepthOption = depth, forceRefresh = false, controller?: AbortController) {
-    if (!activeToken || !objects.length) return;
+    if (tokens.length === 0 || !objects.length) return;
     if (!controller) {
       treeAbortRef.current?.abort();
       controller = new AbortController();
@@ -868,9 +931,11 @@ export default function Page() {
           columns: object.columns,
           selectedColumns: object.selectedColumns,
           properties: object.properties,
-          isLinkedDatabase: object.isLinkedDatabase
+          isLinkedDatabase: object.isLinkedDatabase,
+          token: object.token
         };
-        return buildNode(activeToken.token, rootSeed, maxDepth, {
+        const rootToken = object.token || activeToken?.token || "";
+        return buildNode(rootToken, rootSeed, maxDepth, {
           pageChildren: pageChildrenCache.current,
           databases: databaseCache.current,
           rows: rowsCache.current,
@@ -986,7 +1051,7 @@ export default function Page() {
   }
 
   async function runExport() {
-    if (!activeToken || !selectedNodes.length) return;
+    if (tokens.length === 0 || !selectedNodes.length) return;
     exportAbortRef.current?.abort();
     const controller = new AbortController();
     exportAbortRef.current = controller;
@@ -1041,8 +1106,9 @@ export default function Page() {
           let comments: any[] = [];
           if (shouldFetchPageContent(node, depth)) {
             try {
-              const body = await memoFetch(contentCache.current, `${activeToken.token}:content:${node.id}:${depth}:${fetchComments}`, () =>
-                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(activeToken.token, `/api/notion/page/${node.id}/content?depth=${depth}&comments=${fetchComments}`, { signal: controller.signal, onStatus: setExportStatus })
+              const nodeToken = node.token || activeToken?.token || "";
+              const body = await memoFetch(contentCache.current, `${nodeToken}:content:${node.id}:${depth}:${fetchComments}`, () =>
+                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(nodeToken, `/api/notion/page/${node.id}/content?depth=${depth}&comments=${fetchComments}`, { signal: controller.signal, onStatus: setExportStatus })
               );
               blocks = body.results;
               comments = body.comments || [];
@@ -1114,7 +1180,7 @@ export default function Page() {
       }
 
       setExportStatus("Generating export mapping...");
-      const titleById = await buildExportTitleMap(activeToken.token, items, flatNodes, titleCache.current, { signal: controller.signal, onStatus: setExportStatus });
+      const titleById = await buildExportTitleMap(tokens, items, flatNodes, titleCache.current, { signal: controller.signal, onStatus: setExportStatus });
 
       setExportStatus("Ready!");
       setTitleMap(titleById);
@@ -1183,9 +1249,9 @@ export default function Page() {
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Notionpull</h1>
               <p className="text-xs font-medium text-zinc-500">
-                {activeToken?.workspaceName
-                  ? `${activeToken.workspaceName} (${activeToken.label})`
-                  : activeToken?.label ?? "No active workspace"}
+                {tokens.length > 0
+                  ? tokens.map(t => t.workspaceName || t.label).join(", ")
+                  : "No active workspace"}
               </p>
             </div>
           </div>
@@ -1216,7 +1282,7 @@ export default function Page() {
       </header>
 
       <div className="w-full px-6 py-8">
-        {!activeToken ? (
+        {tokens.length === 0 ? (
           <div className="flex min-h-[60vh] items-center justify-center">
             <div className="max-w-md rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center shadow-sm">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 mb-4">
@@ -1551,7 +1617,7 @@ export default function Page() {
                       <button type="button" className="flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
                     </>
                   )}
-                  {activeToken && detected && (
+                  {tokens.length > 0 && detected && (
                     <button
                       type="button"
                       className="flex items-center justify-center gap-2 rounded-md border border-transparent bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
@@ -1732,7 +1798,7 @@ export default function Page() {
 
       <DatabaseConfigModal
         open={configOpen}
-        token={activeToken?.token}
+        token={configNode?.token || activeToken?.token}
         node={configNode}
         onClose={() => setConfigOpen(false)}
         onSave={saveDatabaseConfig}
@@ -1813,6 +1879,7 @@ type BuildMemo = {
 };
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
+  node.token = token;
   try {
     if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
       if (node.depth >= maxDepth) return node;
@@ -2105,7 +2172,7 @@ function shouldFetchPageContent(node: TreeNodeData, currentDepth: DepthOption): 
   return true;
 }
 
-async function buildExportTitleMap(token: string, items: ExportItem[], nodes: TreeNodeData[], cache: Map<string, string>, options: ApiFetchOptions = {}): Promise<Map<string, string>> {
+async function buildExportTitleMap(tokens: NotionTokenEntry[], items: ExportItem[], nodes: TreeNodeData[], cache: Map<string, string>, options: ApiFetchOptions = {}): Promise<Map<string, string>> {
   const titleById = new Map(cache);
   for (const node of nodes) setKnownTitle(titleById, cache, node.id, node.title);
   for (const item of items) {
@@ -2125,9 +2192,21 @@ async function buildExportTitleMap(token: string, items: ExportItem[], nodes: Tr
   await Promise.all(
     missingIds.map(async (id) => {
       try {
-        const object = await apiFetch<DetectedObject>(token, `/api/notion/detect?id=${encodeURIComponent(id)}`, options);
-        titleById.set(id, object.title);
-        cache.set(id, object.title);
+        let object: DetectedObject | null = null;
+        for (const t of tokens) {
+          try {
+            object = await apiFetch<DetectedObject>(t.token, `/api/notion/detect?id=${encodeURIComponent(id)}`, options);
+            if (object) break;
+          } catch (err) {
+            if (isAbortError(err)) throw err;
+          }
+        }
+        if (object) {
+          titleById.set(id, object.title);
+          cache.set(id, object.title);
+        } else {
+          titleById.set(id, "");
+        }
       } catch (err) {
         if (isAbortError(err)) throw err;
         titleById.set(id, "");
