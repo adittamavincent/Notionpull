@@ -823,6 +823,7 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [copiedRequestId, setCopiedRequestId] = useState<string | null>(null);
   const [copiedResponseId, setCopiedResponseId] = useState<string | null>(null);
   const clearedAtRef = useRef(0);
+  const latestFetchIdRef = useRef(0);
 
   const treeRoots = useMemo(() => buildTree(logs), [logs]);
   const treeSummary = useMemo(() => summarizeTree(treeRoots), [treeRoots]);
@@ -899,10 +900,11 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
   };
 
   const fetchLogs = async (isAutoRefresh = false) => {
+    const fetchId = ++latestFetchIdRef.current;
     if (!isAutoRefresh) setLoading(true);
     try {
       const res = await fetch(`/api/notion/debug?_t=${Date.now()}`);
-      if (res.ok) {
+      if (res.ok && fetchId === latestFetchIdRef.current) {
         const data = (await res.json()) as LogEntry[];
         const nextLogs = clearedAtRef.current > 0
           ? data.filter((log) => log.timestamp >= clearedAtRef.current)
@@ -912,7 +914,9 @@ export function DebugModal({ open, onClose }: { open: boolean; onClose: () => vo
     } catch (err) {
       console.error("Failed to fetch logs", err);
     } finally {
-      if (!isAutoRefresh) setLoading(false);
+      if (fetchId === latestFetchIdRef.current) {
+        if (!isAutoRefresh) setLoading(false);
+      }
     }
   };
 

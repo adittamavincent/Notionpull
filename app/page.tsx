@@ -2169,7 +2169,14 @@ type BuildMemo = {
   signal?: AbortSignal;
 };
 
-async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
+async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo, ancestors: Set<string> = new Set()): Promise<TreeNodeData> {
+  if (ancestors.has(node.id)) {
+    node.status = "DONE";
+    memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+    return node;
+  }
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(node.id);
   node.token = token;
   node.status = "PENDING";
   memo.onNodeUpdated?.(node.id, () => ({ ...node }));
@@ -2186,7 +2193,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
             node.status = "PENDING";
             node.isRelationDatabase = true;
             node.isLinkedDatabase = true;
-            return await buildNode(token, node, maxDepth, memo);
+            return await buildNode(token, node, maxDepth, memo, ancestors);
           }
 
           node.title = detected.title;
@@ -2262,7 +2269,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
         }
         for (let i = 0; i < node.children.length; i++) {
           if (node.children[i].status === "PENDING") {
-            const childNode = await buildNode(token, node.children[i], maxDepth, memo);
+            const childNode = await buildNode(token, node.children[i], maxDepth, memo, nextAncestors);
             const exists = node.children.some((c, idx) => idx !== i && c.id === childNode.id);
             if (exists) {
               node.children.splice(i, 1);
@@ -2368,7 +2375,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               for (const child of newRowNodes) {
                 const idx = node.children!.findIndex(c => c.id === child.id);
                 if (idx !== -1) {
-                  node.children![idx] = await buildNode(token, child, maxDepth, memo);
+                  node.children![idx] = await buildNode(token, child, maxDepth, memo, nextAncestors);
                   memo.onNodeUpdated?.(node.id, () => ({ ...node }));
                 }
               }
@@ -2384,7 +2391,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               node.children[i].status = "DONE";
               memo.onNodeUpdated?.(node.id, () => ({ ...node }));
             } else {
-              node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+              node.children[i] = await buildNode(token, node.children[i], maxDepth, memo, nextAncestors);
               memo.onNodeUpdated?.(node.id, () => ({ ...node }));
             }
           }
