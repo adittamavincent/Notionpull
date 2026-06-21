@@ -838,7 +838,7 @@ export default function Page() {
         showIdForRelationRollup: showRelationIds,
         fetchLinkedChildren,
         fetchComments,
-        maxChildren,
+        maxChildrenMap,
         signal: controller.signal
       });
 
@@ -942,7 +942,7 @@ export default function Page() {
           showIdForRelationRollup: showRelationIds,
           fetchLinkedChildren,
           fetchComments,
-          maxChildren,
+          maxChildrenMap,
           signal: controller!.signal
         });
       }));
@@ -1839,6 +1839,16 @@ function depthValue(depth: DepthOption): number {
   return depth === "All" ? Infinity : Number(depth);
 }
 
+function getLimitForDepth(depthNum: number, maxChildrenMap: Record<DepthOption, number>): number {
+  if (depthNum === 0) return maxChildrenMap["Surface"];
+  if (depthNum === 1) return maxChildrenMap["1"];
+  if (depthNum === 2) return maxChildrenMap["2"];
+  if (depthNum === 3) return maxChildrenMap["3"];
+  if (depthNum === 4) return maxChildrenMap["4"];
+  if (depthNum === 5) return maxChildrenMap["5"];
+  return maxChildrenMap["All"];
+}
+
 function getCachedTreeForDepth(cache: Map<string, TreeNodeData>, rootId: string, depth: DepthOption, viewId?: string): TreeNodeData | null {
   const exact = cache.get(treeCacheKey(rootId, depth, viewId));
   if (exact) return exact;
@@ -1874,6 +1884,7 @@ type BuildMemo = {
   showIdForRelationRollup?: boolean;
   fetchLinkedChildren?: boolean;
   fetchComments?: boolean;
+  maxChildrenMap?: Record<DepthOption, number>;
   maxChildren?: number;
   signal?: AbortSignal;
 };
@@ -1920,7 +1931,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           : (node.selectedColumns && node.selectedColumns.length > 0
             ? node.selectedColumns
             : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns, node.id);
+        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns, node.id, node.depth);
         node.children = rows;
       }
 
@@ -1932,8 +1943,8 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[], containerId?: string): Promise<TreeNodeData[]> {
-  const rows = await memoRows(token, dataSourceId, kind, viewId, memo, containerId);
+async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[], containerId?: string, parentDepth?: number): Promise<TreeNodeData[]> {
+  const rows = await memoRows(token, dataSourceId, kind, viewId, memo, containerId, parentDepth);
   return rows.map((row) => {
     const title = rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup);
     return {
@@ -2009,8 +2020,9 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
   ));
 }
 
-function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string): Promise<NotionPage[]> {
-  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, memo.maxChildren));
+function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number): Promise<NotionPage[]> {
+  const limit = (depth !== undefined && memo.maxChildrenMap) ? getLimitForDepth(depth, memo.maxChildrenMap) : memo.maxChildren;
+  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
