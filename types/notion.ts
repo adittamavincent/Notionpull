@@ -10,6 +10,7 @@ export type DetectedObject = {
   type: "page" | "database" | "data_source";
   id: string;
   title: string;
+  description?: any[];
   viewId?: string;
   views?: NotionDatabaseView[];
   columnDetails?: NotionColumnDetail[];
@@ -63,6 +64,7 @@ export type TreeNodeData = {
   viewId?: string;
   views?: NotionDatabaseView[];
   columnDetails?: NotionColumnDetail[];
+  description?: any[];
   dataSourceId?: string;
   dataSourceName?: string;
   page?: NotionPage;
@@ -75,6 +77,8 @@ export type TreeNodeData = {
   previewColumns?: string[];
   isLinkedDatabase?: boolean;
   token?: string;
+  status?: "PENDING" | "DONE" | "ERROR";
+  block?: NotionBlock;
 };
 
 export type NotionRichText = {

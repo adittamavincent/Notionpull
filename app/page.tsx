@@ -99,10 +99,25 @@ export default function Page() {
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const [username, setUsername] = useState<string | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+
   const [detectedList, setDetectedList] = useState<DetectedObject[]>([]);
+  const [detectingUrls, setDetectingUrls] = useState<Set<string>>(new Set());
   const detected = detectedList[0] ?? null;
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const isRefetch = useMemo(() => {
+    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
+    if (activeUrls.length === 0) return false;
+    return activeUrls.every(url => {
+      const ids = extractNotionIds(url);
+      const matchedDet = detectedList.find(d => ids.includes(d.id));
+      if (!matchedDet) return false;
+      return nodes.some(n => n.id === matchedDet.id);
+    });
+  }, [urls, detectedList, nodes]);
 
   // Requirement: Default depth 1 (now Surface)
   const [depth, setDepth] = useState<DepthOption>("Surface");
@@ -111,6 +126,7 @@ export default function Page() {
 
   const [showRelationIds, setShowRelationIds] = useState(false);
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
+  const [fetchDatabaseRelations, setFetchDatabaseRelations] = useState(false);
   const [fetchComments, setFetchComments] = useState(false);
   const [maxChildrenMap, setMaxChildrenMap] = useState<Record<DepthOption, number>>({
     Surface: 0,
@@ -129,6 +145,33 @@ export default function Page() {
   // Load from localStorage on mount to avoid hydration mismatch
   useEffect(() => {
     try {
+      const savedUser = localStorage.getItem("notionpull_username");
+      if (savedUser) {
+        setUsername(savedUser);
+        fetch(`/api/session?username=${encodeURIComponent(savedUser)}`)
+          .then((res) => res.json())
+          .then((val) => {
+            if (val && !val.error) {
+              if (val.urls) setUrls(val.urls);
+              if (val.detectedList) setDetectedList(val.detectedList);
+              if (val.nodes) setNodes(val.nodes);
+              if (val.urlHistory) setUrlHistory(val.urlHistory);
+              if (val.depth) setDepth(val.depth);
+              if (val.showRelationIds !== undefined) setShowRelationIds(val.showRelationIds);
+              if (val.fetchLinkedChildren !== undefined) setFetchLinkedChildren(val.fetchLinkedChildren);
+              if (val.fetchDatabaseRelations !== undefined) setFetchDatabaseRelations(val.fetchDatabaseRelations);
+              if (val.fetchComments !== undefined) setFetchComments(val.fetchComments);
+              if (val.maxChildrenMap) setMaxChildrenMap(val.maxChildrenMap);
+              if (val.resetLog !== undefined) setResetLog(val.resetLog);
+              if (val.selected) setSelected(new Set(val.selected));
+            }
+            setSessionLoaded(true);
+          })
+          .catch(() => setSessionLoaded(true));
+      } else {
+        setSessionLoaded(true);
+      }
+
       const saved = localStorage.getItem("notionpull_show_relation_ids");
       if (saved !== null) {
         setShowRelationIds(saved === "true");
@@ -136,6 +179,10 @@ export default function Page() {
       const savedLinked = localStorage.getItem("notionpull_fetch_linked_children");
       if (savedLinked !== null) {
         setFetchLinkedChildren(savedLinked === "true");
+      }
+      const savedRelations = localStorage.getItem("notionpull_fetch_database_relations");
+      if (savedRelations !== null) {
+        setFetchDatabaseRelations(savedRelations === "true");
       }
       const savedMaxChildrenMap = localStorage.getItem("notionpull_max_children_map");
       if (savedMaxChildrenMap !== null) {
@@ -172,6 +219,36 @@ export default function Page() {
     } catch { }
   }, []);
 
+  useEffect(() => {
+    if (username && sessionLoaded) {
+      const stateToSave = {
+        urls,
+        detectedList,
+        nodes,
+        urlHistory,
+        depth,
+        showRelationIds,
+        fetchLinkedChildren,
+        fetchDatabaseRelations,
+        fetchComments,
+        maxChildrenMap,
+        resetLog,
+        selected: Array.from(selected)
+      };
+      
+      // Debounce the save operation to avoid spamming the server on rapid UI changes
+      const timeoutId = setTimeout(() => {
+        fetch(`/api/session?username=${encodeURIComponent(username)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(stateToSave)
+        }).catch(err => console.error("Failed to save session", err));
+      }, 1000);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [username, sessionLoaded, urls, detectedList, nodes, urlHistory, depth, showRelationIds, fetchLinkedChildren, fetchDatabaseRelations, fetchComments, maxChildrenMap, resetLog, selected]);
+
   const handleDepthChange = (val: DepthOption) => {
     setDepth(val);
     try {
@@ -201,6 +278,13 @@ export default function Page() {
     setFetchLinkedChildren(val);
     try {
       localStorage.setItem("notionpull_fetch_linked_children", String(val));
+    } catch { }
+  };
+
+  const handleFetchDatabaseRelationsChange = (val: boolean) => {
+    setFetchDatabaseRelations(val);
+    try {
+      localStorage.setItem("notionpull_fetch_database_relations", String(val));
     } catch { }
   };
 
@@ -564,10 +648,10 @@ export default function Page() {
           return node.children?.some(child => selected.has(child.id)) ?? false;
         }
 
-        // Rows with selected children (blocks inside the row's page) are kept so their content gets exported.
-        // Leaf rows (no selected children) are dropped — their data is already in the parent database table.
+        // Rows are explicitly exported if they are selected. No need to drop leaf rows, 
+        // as the user explicitly ticked them and expects them to be exported standalone.
         if (node.kind === "row") {
-          return node.children?.some(child => selected.has(child.id)) ?? false;
+          return true;
         }
 
         // Blocks are always rendered inline under their parent row/page — never export standalone
@@ -626,6 +710,7 @@ export default function Page() {
   }
 
   const triggerQuickDetect = useCallback(async (url: string) => {
+    if (loadingTree) return;
     const trimmed = url.trim();
     if (!trimmed) return;
     const ids = extractNotionIds(trimmed);
@@ -633,6 +718,12 @@ export default function Page() {
 
     const alreadyDetected = detectedList.some(d => ids.includes(d.id));
     if (alreadyDetected) return;
+
+    setDetectingUrls(prev => {
+      const next = new Set(prev);
+      next.add(trimmed);
+      return next;
+    });
 
     let viewId = "";
     try {
@@ -659,8 +750,14 @@ export default function Page() {
       }
     } catch (err) {
       // Quietly ignore background errors
+    } finally {
+      setDetectingUrls(prev => {
+        const next = new Set(prev);
+        next.delete(trimmed);
+        return next;
+      });
     }
-  }, [detectedList, tokens]);
+  }, [detectedList, tokens, loadingTree]);
 
   useEffect(() => {
     urls.forEach(url => {
@@ -756,13 +853,41 @@ export default function Page() {
     await triggerFetch(urls);
   }
 
+  const updateTreeNode = useCallback((nodeId: string, updater: (node: TreeNodeData) => TreeNodeData) => {
+    setNodes(prev => {
+      const walk = (list: TreeNodeData[]): TreeNodeData[] => {
+        return list.map(n => {
+          if (n.id === nodeId) {
+            return updater(n);
+          }
+          if (n.children) {
+            return { ...n, children: walk(n.children) };
+          }
+          return n;
+        });
+      };
+      return walk(prev);
+    });
+  }, []);
+
   async function refetchUrl(index: number) {
     if (tokens.length === 0) return;
     const singleUrl = urls[index]?.trim();
     if (!singleUrl) return;
 
+    setDetectingUrls(prev => {
+      const next = new Set(prev);
+      next.add(singleUrl);
+      return next;
+    });
+
     const ids = extractNotionIds(singleUrl);
     if (!ids.length) {
+      setDetectingUrls(prev => {
+        const next = new Set(prev);
+        next.delete(singleUrl);
+        return next;
+      });
       setError("Could not find a valid Notion ID in URL.");
       return;
     }
@@ -827,8 +952,20 @@ export default function Page() {
         selectedColumns: detectedObj.selectedColumns,
         properties: detectedObj.properties,
         isLinkedDatabase: detectedObj.isLinkedDatabase,
-        token: detectedObj.token
+        token: detectedObj.token,
+        status: "PENDING"
       };
+
+      // Initialize the root in nodes state first
+      setNodes(prev => {
+        const idx = prev.findIndex(n => n.id === rootSeed.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = rootSeed;
+          return next;
+        }
+        return [...prev, rootSeed];
+      });
 
       const nodeToken = detectedObj.token || activeToken?.token || "";
       const freshRoot = await buildNode(nodeToken, rootSeed, maxDepth, {
@@ -837,8 +974,10 @@ export default function Page() {
         rows: rowsCache.current,
         showIdForRelationRollup: showRelationIds,
         fetchLinkedChildren,
+        fetchDatabaseRelations,
         fetchComments,
         maxChildrenMap,
+        onNodeUpdated: updateTreeNode,
         signal: controller.signal
       });
 
@@ -869,6 +1008,11 @@ export default function Page() {
     } catch (err) {
       if (!isAbortError(err)) setError(errorMessage(err));
     } finally {
+      setDetectingUrls(prev => {
+        const next = new Set(prev);
+        next.delete(singleUrl);
+        return next;
+      });
       if (treeAbortRef.current === controller) treeAbortRef.current = null;
       setLoadingTree(false);
     }
@@ -917,7 +1061,7 @@ export default function Page() {
     try {
       const maxDepth = depthValue(currentDepth);
 
-      const roots = await Promise.all(objects.map(async (object) => {
+      const initialRoots = objects.map((object) => {
         const rootSeed: TreeNodeData = {
           id: object.id,
           title: object.title,
@@ -932,20 +1076,30 @@ export default function Page() {
           selectedColumns: object.selectedColumns,
           properties: object.properties,
           isLinkedDatabase: object.isLinkedDatabase,
-          token: object.token
+          token: object.token,
+          status: "PENDING"
         };
-        const rootToken = object.token || activeToken?.token || "";
-        return buildNode(rootToken, rootSeed, maxDepth, {
+        return rootSeed;
+      });
+      setNodes(initialRoots);
+
+      const roots: TreeNodeData[] = [];
+      for (const rootSeed of initialRoots) {
+        const rootToken = rootSeed.token || activeToken?.token || "";
+        const freshRoot = await buildNode(rootToken, rootSeed, maxDepth, {
           pageChildren: pageChildrenCache.current,
           databases: databaseCache.current,
           rows: rowsCache.current,
           showIdForRelationRollup: showRelationIds,
           fetchLinkedChildren,
+          fetchDatabaseRelations,
           fetchComments,
           maxChildrenMap,
+          onNodeUpdated: updateTreeNode,
           signal: controller!.signal
         });
-      }));
+        roots.push(freshRoot);
+      }
 
       // Cache each root
       roots.forEach((root, idx) => {
@@ -1107,11 +1261,32 @@ export default function Page() {
           if (shouldFetchPageContent(node, depth)) {
             try {
               const nodeToken = node.token || activeToken?.token || "";
-              const body = await memoFetch(contentCache.current, `${nodeToken}:content:${node.id}:${depth}:${fetchComments}`, () =>
-                apiFetch<{ results: NotionBlock[]; comments?: any[] }>(nodeToken, `/api/notion/page/${node.id}/content?depth=${depth}&comments=${fetchComments}`, { signal: controller.signal, onStatus: setExportStatus })
-              );
-              blocks = body.results;
-              comments = body.comments || [];
+              
+              // Helper to reconstruct blocks from tree cache
+              const buildBlocksFromTree = (n: TreeNodeData): NotionBlock[] => {
+                if (!n.children || n.children.length === 0) return [];
+                const res: NotionBlock[] = [];
+                for (const child of n.children) {
+                  if (child.block) {
+                    const b = { ...child.block };
+                    b.children = buildBlocksFromTree(child);
+                    res.push(b);
+                  }
+                }
+                return res;
+              };
+
+              let fetchedFromApi = false;
+              if (node.children && node.children.some(c => c.block)) {
+                // We have cached blocks in the tree!
+                blocks = buildBlocksFromTree(node);
+              } else {
+                fetchedFromApi = true;
+                const body = await memoFetch(contentCache.current, `${nodeToken}:content:${node.id}:${depth}:${fetchComments}`, () =>
+                  apiFetch<{ results: NotionBlock[]; comments?: any[] }>(nodeToken, `/api/notion/page/${node.id}/content?depth=${depth}&comments=${fetchComments}`, { signal: controller.signal, onStatus: setExportStatus })
+                );
+                blocks = body.results;
+              }
 
               // If blocks contain child_database, fetch their content too for proper nesting
               for (const block of blocks as any[]) {
@@ -1240,6 +1415,34 @@ export default function Page() {
     }
   }, [urls, detectedList.length]);
 
+  if (!sessionLoaded) {
+    return <div className="min-h-screen flex items-center justify-center bg-zinc-50 text-zinc-500">Loading session...</div>;
+  }
+
+  if (!username) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 px-4">
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const name = fd.get("username") as string;
+          if (name.trim()) {
+            localStorage.setItem("notionpull_username", name.trim());
+            window.location.reload();
+          }
+        }} className="bg-white p-8 rounded-xl shadow-sm border border-zinc-200 max-w-sm w-full">
+          <div className="flex items-center gap-3 mb-6">
+            <Image src="/favicon.png" alt="Notionpull" width={32} height={32} className="rounded-lg" />
+            <h2 className="text-xl font-semibold">Notionpull</h2>
+          </div>
+          <p className="text-zinc-500 mb-6 text-sm">Enter a username to start your persistent session. Your work will be saved automatically.</p>
+          <input name="username" autoFocus placeholder="Username" className="w-full px-3 py-2 border border-zinc-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-zinc-900" />
+          <button type="submit" className="w-full bg-zinc-900 text-white py-2 rounded-lg font-medium">Continue</button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen pb-24 bg-zinc-50">
       <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/90 backdrop-blur">
@@ -1269,6 +1472,28 @@ export default function Page() {
               </div>
               <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Reset Log on Fetch</span>
             </label>
+
+            <button
+              onClick={() => {
+                if (confirm("Are you sure you want to log out and reset your session? All your cached tree data will be deleted.")) {
+                  fetch(`/api/session?username=${encodeURIComponent(username)}`, { method: "DELETE" })
+                    .then(() => {
+                      localStorage.removeItem("notionpull_username");
+                      window.location.reload();
+                    })
+                    .catch(() => {
+                      // Fallback just in case server is unreachable
+                      localStorage.removeItem("notionpull_username");
+                      window.location.reload();
+                    });
+                }
+              }}
+              className="text-sm font-medium text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <LogOut className="w-4 h-4" />
+              Reset Session
+            </button>
+
             <div className="flex gap-2">
               <button className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 transition" onClick={() => setDebugOpen(true)}>
                 Debug
@@ -1360,7 +1585,24 @@ export default function Page() {
                         <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchLinkedChildren ? "bg-zinc-900" : "bg-zinc-200"}`} />
                         <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchLinkedChildren ? "translate-x-4" : "translate-x-0"}`} />
                       </div>
-                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Linked DB Children</span>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Cell Links</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={fetchDatabaseRelations}
+                          onChange={(e) => handleFetchDatabaseRelationsChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${fetchDatabaseRelations ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchDatabaseRelations ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">DB Relations</span>
                     </label>
 
                     <div className="hidden sm:block h-4 w-px bg-zinc-200" />
@@ -1418,6 +1660,7 @@ export default function Page() {
                 {/* Left Side: Inputs */}
                 <div className="flex-1 w-full space-y-3">
                   {urls.map((singleUrl, index) => {
+                    const isDetecting = detectingUrls.has(singleUrl);
                     const urlIds = extractNotionIds(singleUrl);
                     const matchedDet = detectedList.find((d) => urlIds.includes(d.id));
                     const isDuplicate = singleUrl.trim() && urls.filter((u) => normalizeUrl(u) === normalizeUrl(singleUrl)).length > 1;
@@ -1428,7 +1671,7 @@ export default function Page() {
                             <div
                               className="url-highlight-overlay absolute inset-0 pl-3.5 pr-3 text-sm font-mono whitespace-nowrap overflow-hidden pointer-events-none select-none border border-transparent bg-transparent leading-[1.25rem] py-[calc(0.5rem+1px)]"
                               style={{
-                                paddingRight: matchedDet && isDuplicate ? "18rem" : matchedDet ? "14rem" : isDuplicate ? "6rem" : "0.75rem"
+                                paddingRight: isDetecting ? "8rem" : matchedDet && isDuplicate ? "18rem" : matchedDet ? "14rem" : isDuplicate ? "6rem" : "0.75rem"
                               }}
                               dangerouslySetInnerHTML={{ __html: highlightNotionUrl(singleUrl) }}
                             />
@@ -1437,7 +1680,7 @@ export default function Page() {
                             className={`w-full rounded-md border pl-3.5 py-2 text-sm font-mono outline-none transition duration-150 caret-zinc-950 bg-transparent relative z-10 ${
                               singleUrl ? "text-transparent" : "text-zinc-900"
                             } ${
-                              matchedDet && isDuplicate ? "pr-72" : matchedDet ? "pr-56" : isDuplicate ? "pr-24" : "pr-3"
+                              isDetecting ? "pr-32" : matchedDet && isDuplicate ? "pr-72" : matchedDet ? "pr-56" : isDuplicate ? "pr-24" : "pr-3"
                             } ${
                               isDuplicate
                                 ? "border-amber-500 ring-2 ring-amber-500/10 focus:border-amber-600 focus:ring-amber-600/20"
@@ -1457,7 +1700,12 @@ export default function Page() {
                             onFocus={() => setActiveInputIndex(index)}
                             placeholder="Paste a Notion page or database URL..."
                           />
-                          {(matchedDet || isDuplicate) && (
+                          {isDetecting ? (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Detecting...</span>
+                            </div>
+                          ) : (matchedDet || isDuplicate) && (
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center gap-1.5 text-xs text-zinc-400">
                               {isDuplicate && (
                                 <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 animate-pulse">
@@ -1506,17 +1754,22 @@ export default function Page() {
                             <X className="h-4 w-4" />
                           </button>
                         )}
-                        {singleUrl.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => refetchUrl(index)}
-                            disabled={loadingTree}
-                            className="rounded-md border border-zinc-900 bg-zinc-900 p-2 text-white hover:bg-zinc-800 active:scale-95 transition shadow-sm shrink-0 disabled:bg-zinc-400 disabled:border-zinc-400 disabled:scale-100"
-                            title="Refetch this URL"
-                          >
-                            <RefreshCw className="h-4 w-4" />
-                          </button>
-                        )}
+                        {singleUrl.trim() && (() => {
+                          const ids = extractNotionIds(singleUrl);
+                          const matchedDet = detectedList.find(d => ids.includes(d.id));
+                          const isFetched = !!(matchedDet && nodes.some(n => n.id === matchedDet.id));
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => refetchUrl(index)}
+                              disabled={loadingTree}
+                              className="rounded-md border border-zinc-900 bg-zinc-900 p-2 text-white hover:bg-zinc-800 active:scale-95 transition shadow-sm shrink-0 disabled:bg-zinc-400 disabled:border-zinc-400 disabled:scale-100"
+                              title={isFetched ? "Refetch this URL" : "Fetch this URL"}
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </button>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -1608,16 +1861,16 @@ export default function Page() {
                         <span>Fetching...</span>
                       </>
                     ) : (
-                      detected ? "Refetch" : "Fetch"
+                      isRefetch ? "Refetch" : "Fetch"
                     )}
                   </button>
-                  {detected && flatNodes.length > 0 && (
+                  {detected && !loadingTree && flatNodes.length > 0 && (
                     <>
                       <button type="button" className="flex items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-50" onClick={deselectAll} disabled={!flatNodes.length}>Deselect All</button>
                       <button type="button" className="flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50" onClick={selectAll} disabled={!flatNodes.length}>Select All</button>
                     </>
                   )}
-                  {tokens.length > 0 && detected && (
+                  {tokens.length > 0 && detected && !loadingTree && nodes.length > 0 && (
                     <button
                       type="button"
                       className="flex items-center justify-center gap-2 rounded-md border border-transparent bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 active:scale-95 hover:shadow-md disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
@@ -1871,29 +2124,37 @@ function cloneTreeToDepth(node: TreeNodeData, maxDepth: number): TreeNodeData {
 
   return {
     ...node,
-    children: node.children.map((child) => cloneTreeToDepth(child, maxDepth))
+children: node.children.map((child) => cloneTreeToDepth(child, maxDepth))
   };
 }
 
 type PageChildrenResponse = { results: Array<{ id: string; type: "page" | "database" | "block"; title: string; dataSourceName?: string }> };
-type DatabaseResponse = { dataSourceId: string; dataSourceName?: string; title: string; viewId?: string; views?: Array<{ id: string; title?: string }>; columnDetails?: Array<{ id?: string; name: string; visible?: boolean; width?: number }>; columns?: string[]; selectedColumns?: string[]; properties?: Record<string, any> };
+type DatabaseResponse = { dataSourceId: string; dataSourceName?: string; title: string; viewId?: string; views?: Array<{ id: string; title?: string }>; columnDetails?: Array<{ id?: string; name: string; visible?: boolean; width?: number }>; columns?: string[]; selectedColumns?: string[]; description?: any[]; properties?: Record<string, any> };
 type BuildMemo = {
   pageChildren: Map<string, Promise<PageChildrenResponse>>;
   databases: Map<string, Promise<DatabaseResponse>>;
   rows: Map<string, Promise<NotionPage[]>>;
   showIdForRelationRollup?: boolean;
   fetchLinkedChildren?: boolean;
+  fetchDatabaseRelations?: boolean;
   fetchComments?: boolean;
   maxChildrenMap?: Record<DepthOption, number>;
   maxChildren?: number;
+  onNodeUpdated?: (nodeId: string, updater: (node: TreeNodeData) => TreeNodeData) => void;
   signal?: AbortSignal;
 };
 
 async function buildNode(token: string, node: TreeNodeData, maxDepth: number, memo: BuildMemo): Promise<TreeNodeData> {
   node.token = token;
+  node.status = "PENDING";
+  memo.onNodeUpdated?.(node.id, () => ({ ...node }));
   try {
     if (node.kind === "page" || node.kind === "row" || node.kind === "block") {
-      if (node.depth >= maxDepth) return node;
+      if (node.depth >= maxDepth) {
+        node.status = "DONE";
+        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+        return node;
+      }
 
       if ((!node.title || node.title === "Loading...") && (node.kind === "page" || node.kind === "row")) {
         try {
@@ -1901,32 +2162,45 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
           node.title = detected.title;
           const detectedType = detected.type === "database" ? "database" : (detected.type === "page" ? "page" : node.kind);
           node.kind = detectedType as any;
+          if (detected.properties && !node.page) {
+            node.page = { id: node.id, object: "page", properties: detected.properties } as any;
+          }
         } catch {
           node.title = node.title || "Untitled";
         }
       }
 
-      if ((node.kind as any) === "database" || (node.kind as any) === "data_source") {
-        return buildNode(token, node, maxDepth, memo);
-      }
-
       if (!node.children) {
-        const body = await memoPageChildren(token, node.id, memo);
-        let childNodes: TreeNodeData[] = body.results.map((child: any) => ({
-          id: child.id,
-          title: child.title,
-          kind: child.type as any,
-          depth: node.depth + 1,
-          parentId: node.id,
-          dataSourceName: child.dataSourceName
-        }));
+        node.children = [];
+        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
 
-        if (node.kind === "row" && node.page && memo.fetchLinkedChildren) {
+        let childNodes: TreeNodeData[] = [];
+        if (node.depth < maxDepth) {
+            const body = await memoPageChildren(token, node.id, memo);
+            childNodes = body.results.map((child: any) => ({
+              id: child.id,
+              title: child.title,
+              kind: child.type as any,
+              depth: node.depth + 1,
+              parentId: node.id,
+              dataSourceName: child.dataSourceName,
+              status: "PENDING",
+              block: child
+            }));
+        }
+
+        if ((node.kind === "row" || node.kind === "page") && node.page && memo.fetchLinkedChildren) {
           const relationIds = new Set<string>();
           for (const prop of Object.values(node.page.properties ?? {})) {
             if (prop && (prop as any).type === "relation" && Array.isArray((prop as any).relation)) {
               for (const rel of (prop as any).relation) {
-                if (rel.id) relationIds.add(rel.id);
+                if (rel.id && rel.id !== node.id) relationIds.add(rel.id);
+              }
+            }
+            if (prop && ["rich_text", "title", "url"].includes((prop as any).type)) {
+              const extracted = extractNotionIds(JSON.stringify(prop));
+              for (const id of extracted) {
+                if (id !== node.id) relationIds.add(id);
               }
             }
           }
@@ -1939,15 +2213,22 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
               title: "Loading...",
               kind: "page" as const,
               depth: node.depth + 1,
-              parentId: node.id
+              parentId: node.id,
+              status: "PENDING" as const
             }));
 
           childNodes = [...childNodes, ...newRelationNodes];
         }
 
-        node.children = childNodes;
+        node.children.push(...childNodes);
+        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
       }
-      node.children = await Promise.all(node.children.map((child) => buildNode(token, child, maxDepth, memo)));
+      for (let i = 0; i < node.children.length; i++) {
+        if (node.children[i].status === "PENDING") {
+          node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+          memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+        }
+      }
     }
     if (node.kind === "database" || node.kind === "data_source") {
       const metadata = await resolveContainerMetadata(token, node, memo);
@@ -1958,49 +2239,124 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
       node.columns = metadata.columns ?? node.columns;
       node.selectedColumns = metadata.selectedColumns ?? node.selectedColumns;
       node.columnDetails = metadata.columnDetails ?? node.columnDetails;
+      node.description = metadata.description ?? node.description;
       node.properties = metadata.properties ?? node.properties;
       node.isLinkedDatabase = metadata.isLinkedDatabase ?? node.isLinkedDatabase;
       const rowSourceKind = resolveRowSourceKind(node.id, node.dataSourceId, node.kind as "database" | "data_source");
 
-      if (node.depth + 1 > maxDepth) return node;
-
-      const isLinkedDb = !!node.isLinkedDatabase;
-      if (isLinkedDb && !memo.fetchLinkedChildren) return node;
-
-      if (!node.children) {
-        const previewColumns = node.previewColumns && node.previewColumns.length > 0
-          ? node.previewColumns
-          : (node.selectedColumns && node.selectedColumns.length > 0
-            ? node.selectedColumns
-            : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
-        const rows = await rowNodes(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, node.depth + 1, node.id, memo, previewColumns, node.id, node.depth);
-        node.children = rows;
+      if (node.depth >= 30) {
+        node.status = "DONE";
+        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+        return node;
       }
 
-      node.children = await Promise.all((node.children ?? []).map((row) => buildNode(token, row, maxDepth, memo)));
+      if (!node.children) {
+        node.children = [];
+        
+        if (memo.fetchDatabaseRelations && node.properties) {
+          const relationDbIds = new Set<string>();
+          for (const prop of Object.values(node.properties)) {
+            if (prop.type === "relation" && prop.relation?.database_id) {
+              relationDbIds.add(prop.relation.database_id);
+            }
+          }
+          
+          // Description links
+          if (node.description) {
+            const descLinks = extractNotionIds(JSON.stringify(node.description));
+            for (const id of descLinks) {
+              if (id !== node.id) relationDbIds.add(id);
+            }
+          }
+
+          for (const id of relationDbIds) {
+            node.children.push({
+              id,
+              title: "Loading linked database...",
+              kind: "database",
+              depth: node.depth + 1,
+              parentId: node.id,
+              isLinkedDatabase: true,
+              status: "PENDING"
+            });
+          }
+        }
+        memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+
+        if (node.depth + 1 <= maxDepth) {
+          const previewColumns = node.previewColumns && node.previewColumns.length > 0
+            ? node.previewColumns
+            : (node.selectedColumns && node.selectedColumns.length > 0
+              ? node.selectedColumns
+              : node.columnDetails?.filter((col) => col.visible !== false).map((col) => col.name));
+
+          const cacheKey = `${token}:rows:${node.id}:${node.dataSourceId ?? node.id}:${rowSourceKind}:${node.viewId ?? ""}`;
+          if (memo.rows.has(cacheKey)) {
+            const rows = await memo.rows.get(cacheKey)!;
+            const newRowNodes = rows.map((row) => ({
+              id: row.id,
+              title: rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup) || "Untitled",
+              kind: "row" as const,
+              depth: node.depth + 1,
+              parentId: node.id,
+              page: row,
+              status: "PENDING" as const
+            }));
+            node.children.push(...newRowNodes);
+            memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+          } else {
+            await memoRows(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, memo, node.id, node.depth, async (pageRows) => {
+              const newRowNodes = pageRows.map((row) => ({
+                id: row.id,
+                title: rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup) || "Untitled",
+                kind: "row" as const,
+                depth: node.depth + 1,
+                parentId: node.id,
+                page: row,
+                status: "PENDING" as const
+              }));
+              node.children!.push(...newRowNodes);
+              memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+              
+              for (const child of newRowNodes) {
+                const idx = node.children!.findIndex(c => c.id === child.id);
+                if (idx !== -1) {
+                  node.children![idx] = await buildNode(token, child, maxDepth, memo);
+                  memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+                }
+              }
+            });
+          }
+        }
+      }
+
+      if (node.children) {
+        for (let i = 0; i < node.children.length; i++) {
+          if (node.children[i].status === "PENDING") {
+            if (node.children[i].depth > 30) {
+              node.children[i].status = "DONE";
+              memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+            } else {
+              node.children[i] = await buildNode(token, node.children[i], maxDepth, memo);
+              memo.onNodeUpdated?.(node.id, () => ({ ...node }));
+            }
+          }
+        }
+      }
     }
+    node.status = "DONE";
+    memo.onNodeUpdated?.(node.id, () => ({ ...node }));
   } catch (err) {
     node.error = errorMessage(err);
+    node.status = "ERROR";
+    memo.onNodeUpdated?.(node.id, () => ({ ...node }));
   }
   return node;
 }
 
-async function rowNodes(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, depth: number, parentId: string, memo: BuildMemo, previewColumns?: string[], containerId?: string, parentDepth?: number): Promise<TreeNodeData[]> {
-  const rows = await memoRows(token, dataSourceId, kind, viewId, memo, containerId, parentDepth);
-  return rows.map((row) => {
-    const title = rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup);
-    return {
-      id: row.id,
-      title: title || "Untitled",
-      kind: "row",
-      depth,
-      parentId,
-      page: row
-    };
-  });
-}
 
-async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails" | "isLinkedDatabase">> {
+
+async function resolveContainerMetadata(token: string, node: TreeNodeData, memo: BuildMemo): Promise<Pick<TreeNodeData, "kind" | "dataSourceId" | "dataSourceName" | "columns" | "properties" | "views" | "viewId" | "selectedColumns" | "columnDetails" | "isLinkedDatabase" | "description">> {
   if (node.dataSourceId && node.columns && node.properties) {
     return {
       kind: node.kind === "data_source" ? "data_source" : "database",
@@ -2009,6 +2365,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       columns: node.columns,
       views: node.views,
       columnDetails: node.columnDetails,
+      description: node.description,
       properties: node.properties,
       viewId: node.viewId,
       selectedColumns: node.selectedColumns,
@@ -2026,6 +2383,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       selectedColumns: metadata.selectedColumns,
       views: metadata.views ?? node.views,
       columnDetails: metadata.columnDetails ?? node.columnDetails,
+      description: (metadata as any).description ?? node.description,
       properties: metadata.properties,
       viewId: metadata.viewId,
       isLinkedDatabase: (metadata as any).isLinkedDatabase ?? node.isLinkedDatabase,
@@ -2041,6 +2399,7 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
       selectedColumns: detected.selectedColumns ?? node.selectedColumns,
       views: detected.views ?? node.views,
       columnDetails: detected.columnDetails ?? node.columnDetails,
+      description: detected.description ?? node.description,
       properties: detected.properties ?? node.properties,
       viewId: detected.viewId ?? node.viewId,
       isLinkedDatabase: detected.isLinkedDatabase ?? node.isLinkedDatabase,
@@ -2062,9 +2421,9 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
   ));
 }
 
-function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number): Promise<NotionPage[]> {
+function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number, onPageFetched?: (rows: NotionPage[]) => Promise<void>): Promise<NotionPage[]> {
   const limit = (depth !== undefined && memo.maxChildrenMap) ? getLimitForDepth(depth, memo.maxChildrenMap) : memo.maxChildren;
-  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit));
+  return memoFetch(memo.rows, `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}`, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit, onPageFetched));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -2110,7 +2469,7 @@ let notionClientQueue: Promise<void> = Promise.resolve();
 let notionClientBlockedUntil = 0;
 const NOTION_MIN_REQUEST_SPACING_MS = 375;
 
-async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId?: string, onProgress?: (count: number) => void, options: ApiFetchOptions = {}, maxChildren?: number): Promise<NotionPage[]> {
+async function fetchAllRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId?: string, onProgress?: (count: number) => void, options: ApiFetchOptions = {}, maxChildren?: number, onPageFetched?: (rows: NotionPage[]) => Promise<void>): Promise<NotionPage[]> {
   const rows: NotionPage[] = [];
   let cursor: string | null = null;
   do {
@@ -2122,6 +2481,11 @@ async function fetchAllRows(token: string, dataSourceId: string, kind: "database
     }
     const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows?${qs.toString()}`, options);
     rows.push(...body.results);
+    
+    if (onPageFetched) {
+      await onPageFetched(body.results);
+    }
+    
     cursor = body.has_more ? body.next_cursor : null;
     if (onProgress) onProgress(rows.length);
     if (maxChildren !== undefined && maxChildren > 0 && rows.length >= maxChildren) {

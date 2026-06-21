@@ -190,6 +190,7 @@ export async function GET(request: Request) {
         type: "database",
         id: database.id,
         title: dbTitle,
+        description: database.description,
         dataSourceId: viewDataSourceId ?? resolvedDsId,
         dataSourceName: dataSource?.name ?? actualInfo.dataSourceName ?? database.data_sources?.find((source: any) => source.id === viewDataSourceId)?.name ?? database.data_sources?.[0]?.name,
         isLinkedDatabase,
@@ -204,7 +205,7 @@ export async function GET(request: Request) {
 
     if (targetType === "page") {
       const page = await notionFetch<NotionPage>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(traceRoot, "page") });
-      return Response.json({ type: "page", id: page.id, title: pageTitle(page) });
+      return Response.json({ type: "page", id: page.id, title: pageTitle(page), properties: page.properties });
     }
 
     if (targetType === "block") {

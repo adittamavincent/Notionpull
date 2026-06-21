@@ -11,3 +11,6 @@ out
 scratch*
 scratch.js
 test-notion.ts
+
+scratch/
+.notionpull_sessions/

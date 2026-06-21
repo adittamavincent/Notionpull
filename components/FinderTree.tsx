@@ -23,6 +23,7 @@ type RowProps = {
   node: TreeNodeData;
   selectionState: SelectionState;
   collapsed: Set<string>;
+  disabled?: boolean;
   onToggleCollapse: (id: string) => void;
   onToggle: (node: TreeNodeData, checked: boolean) => void;
   onConfigureDatabase?: (node: TreeNodeData) => void;
@@ -35,7 +36,7 @@ type RowProps = {
   };
 };
 
-function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, onConfigureDatabase, style, dragInfo }: RowProps) {
+function TreeRow({ node, selectionState, collapsed, disabled, onToggleCollapse, onToggle, onConfigureDatabase, style, dragInfo }: RowProps) {
   const hasChildren = node.children && node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
   const isDatabase = node.kind === "database" || node.kind === "data_source";
@@ -71,17 +72,22 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
     }
   };
 
+  const isLoadingPlaceholder = node.id.endsWith("-loading-placeholder");
+
   return (
     <div
-      className="group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50 cursor-pointer select-none"
+      className={isLoadingPlaceholder 
+        ? "group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm select-none pointer-events-none cursor-default opacity-60 italic text-zinc-400"
+        : "group relative flex h-10 items-center border-b border-zinc-100 pr-3 text-sm hover:bg-zinc-50 cursor-pointer select-none"
+      }
       style={style}
       onMouseEnter={() => {
-        if (dragInfo?.isDragging) {
+        if (!isLoadingPlaceholder && dragInfo?.isDragging) {
           dragInfo.onDragOver(node);
         }
       }}
       onMouseDown={(event) => {
-        if (event.button === 0) { // Left click
+        if (!isLoadingPlaceholder && !disabled && event.button === 0) { // Left click
           event.preventDefault(); // Prevent text selection and browser drag
           const nextChecked = selectionState !== "checked";
           onToggle(node, nextChecked); 
@@ -108,15 +114,17 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
 
       {/* Checkbox "Grace Zone" Square */}
       <div className="flex h-10 w-10 shrink-0 items-center justify-center">
-        <input
-          ref={checkboxRef}
-          type="checkbox"
-          className="h-4 w-4 rounded border-zinc-300 accent-zinc-900 pointer-events-none"
-          checked={selectionState === "checked"}
-          readOnly
-          aria-label={`Select ${node.title}`}
-          aria-checked={selectionState === "indeterminate" ? "mixed" : selectionState === "checked"}
-        />
+        {!isLoadingPlaceholder && (
+          <input
+            ref={checkboxRef}
+            type="checkbox"
+            className="h-4 w-4 rounded border-zinc-300 accent-zinc-900 pointer-events-none"
+            checked={selectionState === "checked"}
+            readOnly
+            aria-label={`Select ${node.title}`}
+            aria-checked={selectionState === "indeterminate" ? "mixed" : selectionState === "checked"}
+          />
+        )}
       </div>
 
       <div className="flex flex-1 items-center gap-2 min-w-0">
@@ -184,6 +192,18 @@ function TreeRow({ node, selectionState, collapsed, onToggleCollapse, onToggle, 
             ? "LINKED DATABASE" 
             : node.kind.replace("_", " ")}
         </span>
+
+        {node.status && (
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 border ${
+            node.status === "PENDING" 
+              ? "bg-amber-50 text-amber-700 border-amber-200 animate-pulse" 
+              : node.status === "ERROR"
+              ? "bg-red-50 text-red-700 border-red-200"
+              : "bg-emerald-50 text-emerald-700 border-emerald-200"
+          }`}>
+            {node.status}
+          </span>
+        )}
       </div>
 
       {isDatabase && onConfigureDatabase && (
@@ -295,8 +315,19 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
     const traverse = (nodeList: TreeNodeData[]) => {
       for (const node of nodeList) {
         list.push(node);
-        if (node.children?.length && !collapsed.has(node.id)) {
-          traverse(node.children);
+        if (!collapsed.has(node.id)) {
+          if (node.children?.length) {
+            traverse(node.children);
+          } else if (node.status === "PENDING") {
+            list.push({
+              id: `${node.id}-loading-placeholder`,
+              title: "Loading children...",
+              kind: "block",
+              depth: node.depth + 1,
+              parentId: node.id,
+              status: "PENDING"
+            });
+          }
         }
       }
     };
@@ -312,7 +343,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
     overscan: 15
   });
 
-  if (loading) {
+  if (loading && nodes.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-200 bg-white p-3">
         {Array.from({ length: 8 }).map((_, index) => (
@@ -326,27 +357,24 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
     return null;
   }
 
-  if (visibleFlat.length <= 100) {
-    return (
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-        {visibleFlat.map((node) => (
-          <TreeRow
-            key={node.id}
-            node={node}
-            selectionState={selectionStateById.get(node.id) ?? "unchecked"}
-            collapsed={collapsed}
-            onToggleCollapse={toggleCollapse}
-            onToggle={onToggle}
-            onConfigureDatabase={onConfigureDatabase}
-            dragInfo={dragHandlers}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div ref={parentRef} className="h-[560px] overflow-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
+  const treeContent = visibleFlat.length <= 100 ? (
+    <div className="overflow-hidden rounded-lg">
+      {visibleFlat.map((node) => (
+        <TreeRow
+          key={node.id}
+          node={node}
+          selectionState={selectionStateById.get(node.id) ?? "unchecked"}
+          collapsed={collapsed}
+          disabled={loading}
+          onToggleCollapse={toggleCollapse}
+          onToggle={onToggle}
+          onConfigureDatabase={onConfigureDatabase}
+          dragInfo={dragHandlers}
+        />
+      ))}
+    </div>
+  ) : (
+    <div ref={parentRef} className="h-[560px] overflow-auto rounded-lg">
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map((item) => {
           const node = visibleFlat[item.index];
@@ -356,6 +384,7 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
               node={node}
               selectionState={selectionStateById.get(node.id) ?? "unchecked"}
               collapsed={collapsed}
+              disabled={loading}
               onToggleCollapse={toggleCollapse}
               onToggle={onToggle}
               onConfigureDatabase={onConfigureDatabase}
@@ -371,6 +400,17 @@ export function FinderTree({ nodes, selected, loading, onToggle, onConfigureData
           );
         })}
       </div>
+    </div>
+  );
+
+  return (
+    <div className={`relative flex flex-col rounded-lg border bg-white shadow-sm transition-all duration-300 ${loading ? "border-zinc-400 ring-1 ring-zinc-400/10" : "border-zinc-200"}`}>
+      {loading && (
+        <div className="absolute top-0 left-0 right-0 h-1 overflow-hidden rounded-t-lg bg-zinc-100 z-50">
+          <div className="h-full bg-zinc-900/60 animate-pulse w-full" />
+        </div>
+      )}
+      {treeContent}
     </div>
   );
 }
