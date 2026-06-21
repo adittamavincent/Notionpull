@@ -123,6 +123,8 @@ export default function Page() {
   });
   const maxChildren = maxChildrenMap[depth];
   const [resetLog, setResetLog] = useState(true);
+  const [hoveredDepth, setHoveredDepth] = useState<DepthOption | null>(null);
+  const [depthContainer, setDepthContainer] = useState<HTMLDivElement | null>(null);
 
   // Load from localStorage on mount to avoid hydration mismatch
   useEffect(() => {
@@ -214,6 +216,63 @@ export default function Page() {
       localStorage.setItem("notionpull_reset_log", String(val));
     } catch { }
   };
+
+  // Handle wheel scrolling over depth options to adjust limits
+  useEffect(() => {
+    if (!depthContainer) return;
+    const el = depthContainer;
+
+    const handleWheelEvent = (e: WheelEvent) => {
+      const btn = (e.target as HTMLElement).closest("button[data-depth-option]");
+      if (!btn) return;
+      const option = btn.getAttribute("data-depth-option") as DepthOption;
+      if (!option) return;
+
+      e.preventDefault();
+      const direction = e.deltaY < 0 ? 1 : -1;
+      
+      setMaxChildrenMap(prev => {
+        const currentVal = prev[option];
+        const newVal = Math.max(0, currentVal + direction);
+        const next = { ...prev, [option]: newVal };
+        try {
+          localStorage.setItem("notionpull_max_children_map", JSON.stringify(next));
+        } catch { }
+        return next;
+      });
+    };
+
+    el.addEventListener("wheel", handleWheelEvent, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handleWheelEvent);
+    };
+  }, []);
+
+  // Handle keyboard up/down arrows when a depth option is hovered
+  useEffect(() => {
+    if (!hoveredDepth) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const direction = e.key === "ArrowUp" ? 1 : -1;
+        setMaxChildrenMap(prev => {
+          const currentVal = prev[hoveredDepth];
+          const newVal = Math.max(0, currentVal + direction);
+          const next = { ...prev, [hoveredDepth]: newVal };
+          try {
+            localStorage.setItem("notionpull_max_children_map", JSON.stringify(next));
+          } catch { }
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [hoveredDepth]);
 
   // Reactively update custom preview node titles when showRelationIds changes
   useEffect(() => {
@@ -1175,28 +1234,19 @@ export default function Page() {
                 <div className="flex flex-wrap items-center justify-end gap-4 ml-auto min-w-0 flex-auto">
                   {/* Before Fetch Settings */}
                   <div className="flex flex-wrap items-center gap-4 bg-zinc-50 border border-zinc-200/80 rounded-xl px-3.5 py-1.5 shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-zinc-500">Max DB Children ({depth})</span>
-                      <input
-                        type="number"
-                        className="w-16 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold outline-none transition focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
-                        value={maxChildren}
-                        onChange={(e) => handleMaxChildrenChange(Math.max(0, parseInt(e.target.value) || 0))}
-                        min="0"
-                        disabled={loadingTree}
-                      />
-                    </div>
 
-                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2" title="Hover button & scroll or use Up/Down arrows to adjust max children">
                       <span className="text-xs font-semibold text-zinc-500">Depth</span>
-                      <div className="flex rounded-md border border-zinc-300 bg-white p-0.5 shadow-sm">
+                      <div ref={setDepthContainer} className="flex rounded-md border border-zinc-300 bg-white p-0.5 shadow-sm select-none">
                         {depthOptions.map((option) => (
                           <button
                             key={option}
                             type="button"
-                            className={`rounded px-2 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
+                            data-depth-option={option}
+                            onMouseEnter={() => setHoveredDepth(option)}
+                            onMouseLeave={() => setHoveredDepth(null)}
+                            className={`relative rounded px-2 py-0.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-50 ${depth === option ? "bg-zinc-900 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100"}`}
                             onClick={() => {
                               if (option !== depth) {
                                 setDepth(option);
@@ -1208,6 +1258,12 @@ export default function Page() {
                             <span className={`ml-1 text-[9px] font-normal ${depth === option ? "text-zinc-300" : "text-zinc-400"}`}>
                               ({maxChildrenMap[option] === 0 ? "Max" : maxChildrenMap[option]})
                             </span>
+                            {hoveredDepth === option && (
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 bg-zinc-950 text-white text-[10px] py-1.5 px-2.5 rounded-md shadow-lg pointer-events-none whitespace-nowrap flex flex-col items-center border border-zinc-800 leading-tight">
+                                <span className="font-bold">Limit: {maxChildrenMap[option] === 0 ? "Unlimited" : maxChildrenMap[option]}</span>
+                                <span className="text-[8px] text-zinc-400 mt-0.5">Scroll / Arrow Up/Down to adjust</span>
+                              </div>
+                            )}
                           </button>
                         ))}
                       </div>
