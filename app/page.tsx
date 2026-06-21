@@ -2307,7 +2307,7 @@ async function buildNode(token: string, node: TreeNodeData, maxDepth: number, me
             node.children.push(...newRowNodes);
             memo.onNodeUpdated?.(node.id, () => ({ ...node }));
           } else {
-            await memoRows(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, memo, node.id, node.depth, async (pageRows) => {
+            await memoRows(token, node.dataSourceId ?? node.id, rowSourceKind, node.viewId, memo, node.id, node.depth + 1, async (pageRows) => {
               const newRowNodes = pageRows.map((row) => ({
                 id: row.id,
                 title: rowDisplayTitle(row, previewColumns, memo.showIdForRelationRollup) || "Untitled",
