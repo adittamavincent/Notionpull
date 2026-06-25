@@ -128,6 +128,7 @@ export default function Page() {
   const [fetchLinkedChildren, setFetchLinkedChildren] = useState(false);
   const [fetchDatabaseRelations, setFetchDatabaseRelations] = useState(false);
   const [fetchComments, setFetchComments] = useState(false);
+  const [resolveRelationTitles, setResolveRelationTitles] = useState(false);
   const [maxChildrenMap, setMaxChildrenMap] = useState<Record<DepthOption, number>>({
     Surface: 0,
     "1": 0,
@@ -161,6 +162,7 @@ export default function Page() {
               if (val.fetchLinkedChildren !== undefined) setFetchLinkedChildren(val.fetchLinkedChildren);
               if (val.fetchDatabaseRelations !== undefined) setFetchDatabaseRelations(val.fetchDatabaseRelations);
               if (val.fetchComments !== undefined) setFetchComments(val.fetchComments);
+              if (val.resolveRelationTitles !== undefined) setResolveRelationTitles(val.resolveRelationTitles);
               if (val.maxChildrenMap) setMaxChildrenMap(val.maxChildrenMap);
               if (val.resetLog !== undefined) setResetLog(val.resetLog);
               if (val.selected) setSelected(new Set(val.selected));
@@ -212,6 +214,10 @@ export default function Page() {
       if (savedComments !== null) {
         setFetchComments(savedComments === "true");
       }
+      const savedResolve = localStorage.getItem("notionpull_resolve_relation_titles");
+      if (savedResolve !== null) {
+        setResolveRelationTitles(savedResolve === "true");
+      }
       const savedDepth = localStorage.getItem("notionpull_depth");
       if (savedDepth !== null) {
         setDepth(savedDepth as DepthOption);
@@ -231,6 +237,7 @@ export default function Page() {
         fetchLinkedChildren,
         fetchDatabaseRelations,
         fetchComments,
+        resolveRelationTitles,
         maxChildrenMap,
         resetLog,
         selected: Array.from(selected)
@@ -247,7 +254,7 @@ export default function Page() {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [username, sessionLoaded, urls, detectedList, nodes, urlHistory, depth, showRelationIds, fetchLinkedChildren, fetchDatabaseRelations, fetchComments, maxChildrenMap, resetLog, selected]);
+  }, [username, sessionLoaded, urls, detectedList, nodes, urlHistory, depth, showRelationIds, fetchLinkedChildren, fetchDatabaseRelations, fetchComments, resolveRelationTitles, maxChildrenMap, resetLog, selected]);
 
   const handleDepthChange = (val: DepthOption) => {
     setDepth(val);
@@ -292,6 +299,13 @@ export default function Page() {
     setFetchComments(val);
     try {
       localStorage.setItem("notionpull_fetch_comments", String(val));
+    } catch { }
+  };
+
+  const handleResolveRelationTitlesChange = (val: boolean) => {
+    setResolveRelationTitles(val);
+    try {
+      localStorage.setItem("notionpull_resolve_relation_titles", String(val));
     } catch { }
   };
 
@@ -1375,7 +1389,11 @@ export default function Page() {
       }
 
       setExportStatus("Generating export mapping...");
-      const titleById = await buildExportTitleMap(tokens, items, flatNodes, titleCache.current, { signal: controller.signal, onStatus: setExportStatus });
+      const titleById = await buildExportTitleMap(tokens, items, flatNodes, titleCache.current, {
+        signal: controller.signal,
+        onStatus: setExportStatus,
+        resolveRelationTitles
+      });
 
       setExportStatus("Ready!");
       setTitleMap(titleById);
@@ -1643,6 +1661,23 @@ export default function Page() {
                         <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${fetchComments ? "translate-x-4" : "translate-x-0"}`} />
                       </div>
                       <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Fetch Comments</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={resolveRelationTitles}
+                          onChange={(e) => handleResolveRelationTitlesChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${resolveRelationTitles ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${resolveRelationTitles ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Resolve Titles</span>
                     </label>
                   </div>
 
@@ -2521,6 +2556,7 @@ function rowDisplayTitle(row: NotionPage, preferredColumns?: string[], showIdFor
 type ApiFetchOptions = {
   signal?: AbortSignal;
   onStatus?: (message: string) => void;
+  resolveRelationTitles?: boolean;
 };
 
 let notionClientQueue: Promise<void> = Promise.resolve();
@@ -2661,6 +2697,10 @@ async function buildExportTitleMap(tokens: NotionTokenEntry[], items: ExportItem
       setKnownTitle(titleById, cache, item.page.id, firstTitleProperty(item.page));
       collectPropertyObjectIds(item.page.properties, titleById);
     }
+  }
+
+  if (!options.resolveRelationTitles) {
+    return titleById;
   }
 
   const missingIds = Array.from(titleById.entries()).filter(([, title]) => !title).map(([id]) => id);
