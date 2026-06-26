@@ -11,17 +11,18 @@ type Props = {
   onClose: () => void;
   showIdForRelationRollup: boolean;
   onToggleShowIdForRelationRollup: (val: boolean) => void;
+  includePropertyIds?: boolean;
 };
 
-export function ExportModal({ open, items, titleById, onClose, showIdForRelationRollup, onToggleShowIdForRelationRollup }: Props) {
+export function ExportModal({ open, items, titleById, onClose, showIdForRelationRollup, onToggleShowIdForRelationRollup, includePropertyIds = false }: Props) {
   const [output, setOutput] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (open && items.length > 0) {
-      setOutput(exportMarkdown(items, { titleById, showIdForRelationRollup }));
+      setOutput(exportMarkdown(items, { titleById, showIdForRelationRollup, includePropertyIds }));
     }
-  }, [open, items, titleById, showIdForRelationRollup]);
+  }, [open, items, titleById, showIdForRelationRollup, includePropertyIds]);
 
   useEffect(() => {
     if (!open) return;

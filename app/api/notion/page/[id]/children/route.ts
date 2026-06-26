@@ -7,6 +7,10 @@ export async function GET(request: Request, { params }: Params) {
     const token = tokenFromRequest(request);
     const { searchParams } = new URL(request.url);
     const fetchComments = searchParams.get("comments") === "true";
+    // resolveLinkedTitles: for each child_database / link_to_page block, fetch the
+    // canonical data_source title via views + data_sources endpoints (2–3 extra calls each).
+    // Off by default to keep tree expansion fast.
+    const resolveLinkedTitles = searchParams.get("resolveLinkedTitles") === "true";
 
     if (fetchComments) {
       try {
@@ -50,14 +54,29 @@ export async function GET(request: Request, { params }: Params) {
         try {
           if (targetType === "database") {
             const db = await notionFetch<any>(token, `/databases/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-database/${targetId}`) });
-            const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
-            const actualDbId = actualInfo.dataSourceId ?? targetId;
+            let title = db.title?.map((t: any) => t.plain_text || "").join("").trim() || "Untitled database";
+            let dataSourceName: string | undefined;
+            let actualDbId = targetId;
+            let isLinkedDb = false;
+            if (resolveLinkedTitles) {
+              const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
+              actualDbId = actualInfo.dataSourceId ?? targetId;
+              title = actualInfo.title;
+              dataSourceName = actualInfo.dataSourceName;
+              isLinkedDb = !!actualInfo.dataSourceId && actualInfo.dataSourceId !== targetId;
+            } else {
+              const dsId = db.data_sources?.[0]?.id;
+              if (dsId && dsId !== targetId) {
+                actualDbId = dsId;
+                isLinkedDb = true;
+              }
+            }
             resolvedLinks.set(block.id, {
               targetId: actualDbId,
               targetType: "database",
-              title: actualInfo.title,
-              dataSourceName: actualInfo.dataSourceName,
-              isLinkedDatabase: !!actualInfo.dataSourceId && actualInfo.dataSourceId !== targetId
+              title,
+              dataSourceName,
+              isLinkedDatabase: isLinkedDb
             });
           } else {
             const pg = await notionFetch<any>(token, `/pages/${targetId}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `link-page/${targetId}`) });
@@ -81,12 +100,19 @@ export async function GET(request: Request, { params }: Params) {
       promises.push(...childDbBlocks.map(async (block) => {
         try {
           const db = await notionFetch<any>(token, `/databases/${block.id}`, {}, { tracePath: traceChild(`page-children/${params.id}`, `database/${block.id}`) });
-          const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
-          resolvedDbs.set(block.id, {
-            title: actualInfo.title,
-            dataSourceName: actualInfo.dataSourceName,
-            isLinkedDatabase: !!actualInfo.dataSourceId && actualInfo.dataSourceId !== block.id
-          });
+          let title = db.title?.map((t: any) => t.plain_text || "").join("").trim() || "Untitled database";
+          let dataSourceName: string | undefined;
+          let isLinkedDb = false;
+          if (resolveLinkedTitles) {
+            const actualInfo = await resolveDatabaseActualTitle(token, db, `page-children/${params.id}`);
+            title = actualInfo.title;
+            dataSourceName = actualInfo.dataSourceName;
+            isLinkedDb = !!actualInfo.dataSourceId && actualInfo.dataSourceId !== block.id;
+          } else {
+            const dsId = db.data_sources?.[0]?.id;
+            if (dsId && dsId !== block.id) isLinkedDb = true;
+          }
+          resolvedDbs.set(block.id, { title, dataSourceName, isLinkedDatabase: isLinkedDb });
         } catch { }
       }));
     }

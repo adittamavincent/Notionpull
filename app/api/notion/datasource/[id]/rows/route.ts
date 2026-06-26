@@ -6,10 +6,14 @@ type Params = { params: { id: string } };
 export async function GET(request: Request, { params }: Params) {
   try {
     const token = tokenFromRequest(request);
-    const cursor = new URL(request.url).searchParams.get("cursor");
-    const kind = new URL(request.url).searchParams.get("kind");
-    const viewId = new URL(request.url).searchParams.get("viewId");
-    const pageSizeParam = new URL(request.url).searchParams.get("page_size");
+    const searchParams = new URL(request.url).searchParams;
+    const cursor = searchParams.get("cursor");
+    const kind = searchParams.get("kind");
+    const viewId = searchParams.get("viewId");
+    const pageSizeParam = searchParams.get("page_size");
+    // Opt-in flags — both default false to minimise roundtrips
+    const expandRelations = searchParams.get("expandRelations") === "true";
+    const hydrateTitles   = searchParams.get("hydrateTitles") === "true";
     const traceRoot = `datasource/${params.id}`;
     const body: Record<string, unknown> = { page_size: pageSizeParam ? parseInt(pageSizeParam) || 100 : 100 };
     if (cursor) body.start_cursor = cursor;
@@ -39,7 +43,17 @@ export async function GET(request: Request, { params }: Params) {
       }));
     }
 
-    rows.results = await hydrateRelationTitles(token, await expandRelationProperties(token, rows.results ?? [], traceChild(traceRoot, "relations")), traceChild(traceRoot, "titles"));
+    // expandRelations: paginate truncated relation lists (extra GET per property per row)
+    // hydrateTitles:   fetch page/db title for each relation target (extra GET per unique related page)
+    // Both are expensive on large workspaces — opt-in only.
+    let fetchedResults: any[] = rows.results ?? [];
+    if (expandRelations) {
+      fetchedResults = await expandRelationProperties(token, fetchedResults, traceChild(traceRoot, "relations"));
+    }
+    if (hydrateTitles) {
+      fetchedResults = await hydrateRelationTitles(token, fetchedResults, traceChild(traceRoot, "titles"));
+    }
+    rows.results = fetchedResults;
     return Response.json(rows);
   } catch (error) {
     return notionErrorResponse(error);

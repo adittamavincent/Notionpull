@@ -26,7 +26,10 @@ export type PageExportItem = {
 };
 export type ExportItem = DatabaseExportItem | PageExportItem;
 
-export type ExportOptions = PropertyValueOptions;
+export type ExportOptions = PropertyValueOptions & {
+  /** When true, include Notion's internal property-id attribute in schema XML. Default: false. */
+  includePropertyIds?: boolean;
+};
 
 export function exportMarkdown(items: ExportItem[], options: ExportOptions = {}): string {
   const definitionOutputs: string[] = [];
@@ -130,7 +133,7 @@ function databaseToMarkdownTable(item: DatabaseExportItem, options: ExportOption
 
   xmlLines.push("  <schema>");
   for (const column of columns) {
-    xmlLines.push(indent(columnSchemaXml(item, column), 2));
+    xmlLines.push(indent(columnSchemaXml(item, column, options), 2));
   }
   xmlLines.push("  </schema>");
 
@@ -164,7 +167,7 @@ function databaseToMarkdownTable(item: DatabaseExportItem, options: ExportOption
   return xmlLines.join("\n");
 }
 
-function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
+function columnSchemaXml(item: DatabaseExportItem, columnName: string, options: ExportOptions = {}): string {
   const prop = item.properties?.[columnName];
   const detail = item.columnDetails?.find((d) => d.name === columnName);
   const attrs = [
@@ -172,7 +175,7 @@ function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
     `type="${escapeXmlAttribute(prop?.type ?? "unknown")}"`,
     `visible="${detail?.visible === false ? "false" : "true"}"`
   ];
-  if (prop?.id) attrs.push(`property-id="${escapeXmlAttribute(prop.id)}"`);
+  if (prop?.id && options.includePropertyIds) attrs.push(`property-id="${escapeXmlAttribute(prop.id)}"`);
   if (detail?.width !== undefined) attrs.push(`width="${detail.width}"`);
 
   if (prop?.type === "relation" && prop.relation?.database_id) {
@@ -189,15 +192,15 @@ function columnSchemaXml(item: DatabaseExportItem, columnName: string): string {
     }
   }
 
-  const options = propertyOptions(prop);
+  const propOptions = propertyOptions(prop);
   const desc = prop?.description ? `<description>${escapeXmlText(prop.description)}</description>` : "";
-  if (!options.length && !desc) return `<property ${attrs.join(" ")} />`;
+  if (!propOptions.length && !desc) return `<property ${attrs.join(" ")} />`;
 
   const lines = [`<property ${attrs.join(" ")}>`];
   if (desc) lines.push(desc);
-  if (options.length) {
+  if (propOptions.length) {
     lines.push("<options>");
-    for (const option of options) lines.push(`<option>${escapeXmlText(option)}</option>`);
+    for (const option of propOptions) lines.push(`<option>${escapeXmlText(option)}</option>`);
     lines.push("</options>");
   }
   lines.push("</property>");

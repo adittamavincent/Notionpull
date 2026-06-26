@@ -129,6 +129,12 @@ export default function Page() {
   const [fetchDatabaseRelations, setFetchDatabaseRelations] = useState(false);
   const [fetchComments, setFetchComments] = useState(false);
   const [resolveRelationTitles, setResolveRelationTitles] = useState(false);
+  // Opt-in performance flags — all default OFF to minimise Notion API roundtrips
+  const [expandRelations, setExpandRelations] = useState(false);
+  const [hydrateTitles, setHydrateTitles] = useState(false);
+  const [resolveLinkedTitles, setResolveLinkedTitles] = useState(false);
+  const [includePropertyIds, setIncludePropertyIds] = useState(false);
+
   const [maxChildrenMap, setMaxChildrenMap] = useState<Record<DepthOption, number>>({
     Surface: 0,
     "1": 0,
@@ -163,6 +169,10 @@ export default function Page() {
               if (val.fetchDatabaseRelations !== undefined) setFetchDatabaseRelations(val.fetchDatabaseRelations);
               if (val.fetchComments !== undefined) setFetchComments(val.fetchComments);
               if (val.resolveRelationTitles !== undefined) setResolveRelationTitles(val.resolveRelationTitles);
+              if (val.expandRelations !== undefined) setExpandRelations(val.expandRelations);
+              if (val.hydrateTitles !== undefined) setHydrateTitles(val.hydrateTitles);
+              if (val.resolveLinkedTitles !== undefined) setResolveLinkedTitles(val.resolveLinkedTitles);
+              if (val.includePropertyIds !== undefined) setIncludePropertyIds(val.includePropertyIds);
               if (val.maxChildrenMap) setMaxChildrenMap(val.maxChildrenMap);
               if (val.resetLog !== undefined) setResetLog(val.resetLog);
               if (val.selected) setSelected(new Set(val.selected));
@@ -218,6 +228,14 @@ export default function Page() {
       if (savedResolve !== null) {
         setResolveRelationTitles(savedResolve === "true");
       }
+      const savedExpandRelations = localStorage.getItem("notionpull_expand_relations");
+      if (savedExpandRelations !== null) setExpandRelations(savedExpandRelations === "true");
+      const savedHydrateTitles = localStorage.getItem("notionpull_hydrate_titles");
+      if (savedHydrateTitles !== null) setHydrateTitles(savedHydrateTitles === "true");
+      const savedResolveLinkedTitles = localStorage.getItem("notionpull_resolve_linked_titles");
+      if (savedResolveLinkedTitles !== null) setResolveLinkedTitles(savedResolveLinkedTitles === "true");
+      const savedIncludePropertyIds = localStorage.getItem("notionpull_include_property_ids");
+      if (savedIncludePropertyIds !== null) setIncludePropertyIds(savedIncludePropertyIds === "true");
       const savedDepth = localStorage.getItem("notionpull_depth");
       if (savedDepth !== null) {
         setDepth(savedDepth as DepthOption);
@@ -238,6 +256,10 @@ export default function Page() {
         fetchDatabaseRelations,
         fetchComments,
         resolveRelationTitles,
+        expandRelations,
+        hydrateTitles,
+        resolveLinkedTitles,
+        includePropertyIds,
         maxChildrenMap,
         resetLog,
         selected: Array.from(selected)
@@ -254,7 +276,7 @@ export default function Page() {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [username, sessionLoaded, urls, detectedList, nodes, urlHistory, depth, showRelationIds, fetchLinkedChildren, fetchDatabaseRelations, fetchComments, resolveRelationTitles, maxChildrenMap, resetLog, selected]);
+  }, [username, sessionLoaded, urls, detectedList, nodes, urlHistory, depth, showRelationIds, fetchLinkedChildren, fetchDatabaseRelations, fetchComments, resolveRelationTitles, expandRelations, hydrateTitles, resolveLinkedTitles, includePropertyIds, maxChildrenMap, resetLog, selected]);
 
   const handleDepthChange = (val: DepthOption) => {
     setDepth(val);
@@ -308,6 +330,35 @@ export default function Page() {
       localStorage.setItem("notionpull_resolve_relation_titles", String(val));
     } catch { }
   };
+
+  const handleExpandRelationsChange = (val: boolean) => {
+    setExpandRelations(val);
+    try {
+      localStorage.setItem("notionpull_expand_relations", String(val));
+    } catch { }
+  };
+
+  const handleHydrateTitlesChange = (val: boolean) => {
+    setHydrateTitles(val);
+    try {
+      localStorage.setItem("notionpull_hydrate_titles", String(val));
+    } catch { }
+  };
+
+  const handleResolveLinkedTitlesChange = (val: boolean) => {
+    setResolveLinkedTitles(val);
+    try {
+      localStorage.setItem("notionpull_resolve_linked_titles", String(val));
+    } catch { }
+  };
+
+  const handleIncludePropertyIdsChange = (val: boolean) => {
+    setIncludePropertyIds(val);
+    try {
+      localStorage.setItem("notionpull_include_property_ids", String(val));
+    } catch { }
+  };
+
 
   const handleMaxChildrenChange = (val: number) => {
     setMaxChildrenMap(prev => {
@@ -1010,6 +1061,9 @@ export default function Page() {
         fetchLinkedChildren,
         fetchDatabaseRelations,
         fetchComments,
+        expandRelations,
+        hydrateTitles,
+        resolveLinkedTitles,
         maxChildrenMap,
         onNodeUpdated: updateTreeNode,
         signal: controller.signal
@@ -1128,6 +1182,9 @@ export default function Page() {
           fetchLinkedChildren,
           fetchDatabaseRelations,
           fetchComments,
+          expandRelations,
+          hydrateTitles,
+          resolveLinkedTitles,
           maxChildrenMap,
           onNodeUpdated: updateTreeNode,
           signal: controller!.signal
@@ -1679,6 +1736,73 @@ export default function Page() {
                       </div>
                       <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Resolve Titles</span>
                     </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group" title="Paginate truncated relation lists — fetches extra /pages/:id/properties/:propId per row. Expensive on wide databases.">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={expandRelations}
+                          onChange={(e) => handleExpandRelationsChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${expandRelations ? "bg-violet-600" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${expandRelations ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Expand Relations</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group" title="Fetch the page title for each relation target — one extra API call per unique related page.">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={hydrateTitles}
+                          onChange={(e) => handleHydrateTitlesChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${hydrateTitles ? "bg-violet-600" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${hydrateTitles ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Hydrate Titles</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group" title="Resolve canonical data_source titles for inline databases and linked pages — 2–3 extra API calls per block.">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={resolveLinkedTitles}
+                          onChange={(e) => handleResolveLinkedTitlesChange(e.target.checked)}
+                          disabled={loadingTree}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${resolveLinkedTitles ? "bg-violet-600" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${resolveLinkedTitles ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Linked Titles</span>
+                    </label>
+
+                    <div className="hidden sm:block h-4 w-px bg-zinc-200" />
+
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group" title="Include Notion internal property IDs in exported schema XML.">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={includePropertyIds}
+                          onChange={(e) => handleIncludePropertyIdsChange(e.target.checked)}
+                        />
+                        <div className={`w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${includePropertyIds ? "bg-zinc-900" : "bg-zinc-200"}`} />
+                        <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform duration-200 ease-in-out ${includePropertyIds ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-700 transition-colors">Prop IDs</span>
+                    </label>
                   </div>
 
                   {/* After Fetch Settings */}
@@ -2134,6 +2258,7 @@ export default function Page() {
         onClose={() => setExportItems([])}
         showIdForRelationRollup={showRelationIds}
         onToggleShowIdForRelationRollup={handleShowRelationIdsChange}
+        includePropertyIds={includePropertyIds}
       />
 
       <DebugModal open={debugOpen} onClose={() => setDebugOpen(false)} />
@@ -2198,6 +2323,12 @@ type BuildMemo = {
   fetchLinkedChildren?: boolean;
   fetchDatabaseRelations?: boolean;
   fetchComments?: boolean;
+  /** Paginate truncated relation lists via /pages/:id/properties/:propId (opt-in). */
+  expandRelations?: boolean;
+  /** Fetch page title for each relation target (opt-in). */
+  hydrateTitles?: boolean;
+  /** Resolve canonical data_source title for child_database / link_to_page blocks (opt-in). */
+  resolveLinkedTitles?: boolean;
   maxChildrenMap?: Record<DepthOption, number>;
   maxChildren?: number;
   onNodeUpdated?: (nodeId: string, updater: (node: TreeNodeData) => TreeNodeData) => void;
@@ -2500,9 +2631,13 @@ async function resolveContainerMetadata(token: string, node: TreeNodeData, memo:
 }
 
 function memoPageChildren(token: string, pageId: string, memo: BuildMemo): Promise<PageChildrenResponse> {
-  const commentsQuery = memo.fetchComments ? `?comments=true` : "";
-  return memoFetch(memo.pageChildren, `${token}:page:${pageId}:${memo.fetchComments ?? false}`, () => (
-    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children${commentsQuery}`, { signal: memo.signal })
+  const qs = new URLSearchParams();
+  if (memo.fetchComments) qs.set("comments", "true");
+  if (memo.resolveLinkedTitles) qs.set("resolveLinkedTitles", "true");
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  const cacheKey = `${token}:page:${pageId}:comments=${memo.fetchComments ?? false}:rlt=${memo.resolveLinkedTitles ?? false}`;
+  return memoFetch(memo.pageChildren, cacheKey, () => (
+    apiFetch<PageChildrenResponse>(token, `/api/notion/page/${pageId}/children${query}`, { signal: memo.signal })
   ));
 }
 
@@ -2515,8 +2650,8 @@ function memoDatabase(token: string, databaseId: string, kind: "database" | "dat
 
 function memoRows(token: string, dataSourceId: string, kind: "database" | "data_source", viewId: string | undefined, memo: BuildMemo, containerId?: string, depth?: number, onPageFetched?: (rows: NotionPage[]) => Promise<void>, isRelation?: boolean): Promise<NotionPage[]> {
   const limit = isRelation ? Infinity : ((depth !== undefined && memo.maxChildrenMap) ? getLimitForDepth(depth, memo.maxChildrenMap) : memo.maxChildren);
-  const cacheKey = `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}${isRelation ? ":relation" : ""}`;
-  return memoFetch(memo.rows, cacheKey, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal }, limit, onPageFetched));
+  const cacheKey = `${token}:rows:${containerId ?? dataSourceId}:${dataSourceId}:${kind}:${viewId ?? ""}:er=${memo.expandRelations ?? false}:ht=${memo.hydrateTitles ?? false}${isRelation ? ":relation" : ""}`;
+  return memoFetch(memo.rows, cacheKey, () => fetchAllRows(token, dataSourceId, kind, viewId, undefined, { signal: memo.signal, expandRelations: memo.expandRelations, hydrateTitles: memo.hydrateTitles }, limit, onPageFetched));
 }
 
 function memoFetch<T>(cache: Map<string, Promise<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -2557,6 +2692,10 @@ type ApiFetchOptions = {
   signal?: AbortSignal;
   onStatus?: (message: string) => void;
   resolveRelationTitles?: boolean;
+  /** Passed through to /rows API: paginate truncated relation lists. */
+  expandRelations?: boolean;
+  /** Passed through to /rows API: fetch titles for relation targets. */
+  hydrateTitles?: boolean;
 };
 
 let notionClientQueue: Promise<void> = Promise.resolve();
@@ -2573,6 +2712,9 @@ async function fetchAllRows(token: string, dataSourceId: string, kind: "database
     if (maxChildren !== undefined && maxChildren > 0) {
       qs.set("page_size", String(Math.min(maxChildren - rows.length, 100)));
     }
+    // Opt-in flags — only add to URL when true to keep URLs clean by default
+    if (options.expandRelations) qs.set("expandRelations", "true");
+    if (options.hydrateTitles) qs.set("hydrateTitles", "true");
     const body = await apiFetch<RowsResponse>(token, `/api/notion/datasource/${dataSourceId}/rows?${qs.toString()}`, options);
     rows.push(...body.results);
     
